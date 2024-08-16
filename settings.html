@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barbara 設定</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 0;
+            background-color: #f9f9f9;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        p {
+            line-height: 1.6;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+	<script src="settings.js" defer></script>
+</head>
+<body>
+    <div class="section">
+        <h1>Barbara 簡介</h1>
+        <p>Barbara 是一款 Chrome 擴充工具，利用本地運行的大語言模型（如 LMStudio 或 llama.cpp），提供雙語翻譯、文章摘要及互動聊天功能。這款工具能夠在本地電腦上執行，確保您的數據隱私。</p>
+    </div>
+    <div class="section">
+        <h2>如何安裝 LMStudio</h2>
+        <p>為了啟用 Barbara 的完整功能，您需要在本機安裝 LMStudio 並下載相應的模型。以下是詳細的步驟：</p>
+        <h3>步驟 1: 下載 LMStudio</h3>
+        <p>首先，訪問 <a href="https://lmstudio.example.com" target="_blank">LMStudio 官方網站</a>，下載最新版本的 LMStudio 安裝包。</p>
+        <img src="lmstudio-appearance.png" alt="LMStudio 的外觀" title="LMStudio 的外觀">
+        <p>下載完成後，按照安裝向導進行安裝。</p>
+        <h3>步驟 2: 選擇並下載模型</h3>
+        <p>安裝完成後，打開 LMStudio。在「模型」選項卡中，選擇您需要的模型並下載。</p>
+        <img src="download-model.png" alt="下載模型" title="下載模型">
+        <h3>步驟 3: 啟動伺服器</h3>
+        <p>模型下載完成後，返回主頁面，點擊「啟動伺服器」按鈕。這將啟動本地伺服器，使 Barbara 能夠連接並運行各項功能。</p>
+        <img src="start-server.png" alt="啟動伺服器" title="啟動伺服器">
+        <p>完成這些步驟後，您就可以在 Barbara 中使用翻譯、摘要和聊天功能了！</p>
+        <h3>步驟 4: 設定伺服器位址</h3>
+		<p>預設伺服器位在本機，因此預設位址會是localhost。但如果是在其他地方，這裡可以設定位址。例如LLM安裝在樹莓派，則這裡可能可以設定為raspberrypi.local。</p>
+    <label for="llm-url">LLM 所在網址:</label>
+    <input type="text" id="llm-url">:1234
+    <button id="save">保存</button>
+    <button id="reset">重置為 localhost</button>
+		
+    </div>
+
+</body>
+</html>
