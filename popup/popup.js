@@ -54,7 +54,7 @@ console.log("小視窗");
 /* 只影響 .popup 類別內的元素 */
 .popup h2 {
   color: #007bff;
-  font-size: 10px;
+  font-size: 12px;
   margin: 0;
   padding-bottom: 10px;
   border-bottom: 2px solid #007bff;
@@ -77,7 +77,7 @@ console.log("小視窗");
   padding: 12px;
   margin-bottom: 15px;
   box-sizing: border-box;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .popup button {
@@ -236,15 +236,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (targetElement ) {
 
       let existingText = targetElement.innerText || "";
-      
+      let convertedResult = markdownToHtml(result);
+	  
       if (targetLang === "en") {
-        existingText = `<p><strong></strong> ${result}</p>`;
-		localStorage.setItem('translation', JSON.stringify(result));
+        existingText = `<p><strong></strong> ${convertedResult}</p>`;
+		localStorage.setItem('translation', JSON.stringify(convertedResult));
       } else if (targetLang === "zh") {
-        existingText = `<p><strong></strong> ${result}</p>`;
-		localStorage.setItem('translation', JSON.stringify(result));
+        existingText = `<p><strong></strong> ${convertedResult}</p>`;
+		localStorage.setItem('translation', JSON.stringify(convertedResult));
       } else if (elementId === "circle"){
-		//targetElement.hidden = result;
+		//targetElement.hidden = convertedResult;
 		if (result == false){
             const text = document.getElementById('animatedText');
             text.classList.add('animate');
@@ -252,21 +253,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const text = document.getElementById('animatedText');
             text.classList.remove('animate');
 		}
-		localStorage.setItem('circle', JSON.stringify(result));
+		localStorage.setItem('circle', JSON.stringify(convertedResult));
       } else if (elementId === "chatResult") {
-        existingText = `<p><strong></strong> ${result}</p>`;
-		localStorage.setItem('chat', JSON.stringify(result));
+        existingText = `<p><strong></strong> ${convertedResult}</p>`;
+		localStorage.setItem('chat', JSON.stringify(convertedResult));
       } else {
-        existingText = `<p><strong></strong> ${result}</p>`;
-		localStorage.setItem('summary', JSON.stringify(result));
+        existingText = `<p><strong></strong> ${convertedResult}</p>`;
+		localStorage.setItem('summary', JSON.stringify(convertedResult));
       }
 
-      targetElement.innerHTML = existingText;
+      // targetElement.innerHTML = existingText;
+	  // targetElement.innerHTML = `<p></p>`;
+	  targetElement.innerHTML = (`${convertedResult}`);
     }
 	
   } 
 
 });
+
+function markdownToHtml(markdown) {
+    if (markdown == null || typeof markdown !== 'string') {
+        return ''; // 或者返回一个默认值
+    }
+	//console.log(markdown);
+    // 将标题转换为 HTML
+    markdown = markdown.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+    markdown = markdown.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+    // 将段落转换为 HTML
+    markdown = markdown.replace(/^(.*$)/gim, '<p>$1</p>');
+    // 将列表转换为 HTML
+    markdown = markdown.replace(/^\* (.*$)/gim, '<li>$1</li>');
+    // 将粗体转换为 HTML
+    markdown = markdown.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // 将换行符转换为 <br>
+    markdown = markdown.replace(/\n/g, '<br>');
+    return markdown;
+}
 	  
 document.addEventListener('DOMContentLoaded', function() {
     chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
@@ -279,23 +301,23 @@ document.addEventListener('DOMContentLoaded', function() {
 					if (response && response.exists) {
 						chrome.tabs.sendMessage(tabs[0].id, { action: "getData" }, function(response) {
 							if (response) {
-								document.getElementById('translationResult').innerText = response.translation;
+								document.getElementById('translationResult').innerHTML = (response.translation);
 		localStorage.setItem('translation', JSON.stringify(response.translation));
-								document.getElementById('summaryResult').innerText = response.summary;
+								document.getElementById('summaryResult').innerHTML = (response.summary);
 		localStorage.setItem('summary', JSON.stringify(response.summary));
-								document.getElementById('oldChatResult').innerText = response.oldChat;
+								document.getElementById('oldChatResult').innerHTML = (response.oldChat);
 	    localStorage.setItem('oldchat', JSON.stringify(response.oldChat));
-								document.getElementById('chatResult').innerText = response.chat;
+								document.getElementById('chatResult').innerHTML = (response.chat);
 		localStorage.setItem('chat', JSON.stringify(response.chat));
 							}
 						});
 					} else {
 						// webpage's popup is not existingPopup
 						// 
-						document.getElementById("translationResult").innerText = JSON.parse(localStorage.getItem('translation'));
-						document.getElementById("summaryResult").innerText = JSON.parse(localStorage.getItem('summary'));
-						document.getElementById("oldChatResult").innerText = JSON.parse(localStorage.getItem('oldchat'));
-						document.getElementById("chatResult").innerText = JSON.parse(localStorage.getItem('chat'));
+						document.getElementById("translationResult").innerHTML = (JSON.parse(localStorage.getItem('translation')));
+						document.getElementById("summaryResult").innerHTML = (JSON.parse(localStorage.getItem('summary')));
+						document.getElementById("oldChatResult").innerHTML = (JSON.parse(localStorage.getItem('oldchat')));
+						document.getElementById("chatResult").innerHTML = (JSON.parse(localStorage.getItem('chat')));
 						// document.getElementById("circle").hidden = JSON.parse(localStorage.getItem('circle'));
 						document.getElementById("humanText").innerText = JSON.parse(localStorage.getItem('humanText'));
 						
@@ -306,10 +328,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log('Content script not injected');
 						// webpage's popup is not existingPopup
 						// 
-						document.getElementById("translationResult").innerText = JSON.parse(localStorage.getItem('translation'));
-						document.getElementById("summaryResult").innerText = JSON.parse(localStorage.getItem('summary'));
-						document.getElementById("oldChatResult").innerText = JSON.parse(localStorage.getItem('oldchat'));
-						document.getElementById("chatResult").innerText = JSON.parse(localStorage.getItem('chat'));
+						document.getElementById("translationResult").innerHTML = (JSON.parse(localStorage.getItem('translation')));
+						document.getElementById("summaryResult").innerHTML = (JSON.parse(localStorage.getItem('summary')));
+						document.getElementById("oldChatResult").innerHTML = (JSON.parse(localStorage.getItem('oldchat')));
+						document.getElementById("chatResult").innerHTML = (JSON.parse(localStorage.getItem('chat')));
 						// document.getElementById("circle").hidden = JSON.parse(localStorage.getItem('circle'));
 						document.getElementById("humanText").innerText = JSON.parse(localStorage.getItem('humanText'));
             }
@@ -335,8 +357,8 @@ document.addEventListener('DOMContentLoaded', function() {
   	  const summaryText = document.getElementById("summaryResult").innerText + " ";
 	  const chatText = document.getElementById("chatResult").innerText + " ";
 	  
-	  document.getElementById("oldChatResult").innerText = document.getElementById("chatResult").innerText + "\n\n" + humanText;
-	  localStorage.setItem('oldchat', JSON.stringify(document.getElementById("oldChatResult").innerText));
+	  document.getElementById("oldChatResult").innerHTML = document.getElementById("chatResult").innerHTML + "\n\n" + humanText;
+	  localStorage.setItem('oldchat', JSON.stringify(document.getElementById("oldChatResult").innerHTML));
 	  //console.log(translationText, summaryText, chatText);
           const context = translationText + summaryText;
 		  document.getElementById("chatResult").innerText = "";
