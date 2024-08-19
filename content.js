@@ -97,7 +97,7 @@ console.log("小視窗");
 /* 只影響 .popup 類別內的元素 */
 .popup h2 {
   color: #007bff;
-  font-size: 10px;
+  font-size: 12px;
   margin: 0;
   padding-bottom: 10px;
   border-bottom: 2px solid #007bff;
@@ -120,7 +120,7 @@ console.log("小視窗");
   padding: 12px;
   margin-bottom: 15px;
   box-sizing: border-box;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .popup button {
@@ -292,15 +292,16 @@ console.log("小視窗");
     if (targetElement ) {
 
       let existingText = targetElement.innerHTML || "";
-      
+      let convertedResult = markdownToHtml(result);
+	  
       if (targetLang === "en") {
-        existingText = `<p><strong></strong> ${result}</p>`;
-		localStorage.setItem('translation', JSON.stringify(result));
+        existingText = `<p><strong></strong> ${convertedResult}</p>`;
+		localStorage.setItem('translation', JSON.stringify(convertedResult));
       } else if (targetLang === "zh") {
-        existingText = `<p><strong></strong> ${result}</p>`;
-		localStorage.setItem('translation', JSON.stringify(result));
+        existingText = `<p><strong></strong> ${convertedResult}</p>`;
+		localStorage.setItem('translation', JSON.stringify(convertedResult));
       } else if (elementId === "circle"){
-		//targetElement.hidden = result;
+		//targetElement.hidden = convertedResult;
 		if (result == false){
             const text = shadow.getElementById('animatedText');
             text.classList.add('animate');
@@ -308,16 +309,16 @@ console.log("小視窗");
             const text = shadow.getElementById('animatedText');
             text.classList.remove('animate');
 		}
-		localStorage.setItem('circle', JSON.stringify(result));
+		localStorage.setItem('circle', JSON.stringify(convertedResult));
       } else if (elementId === "chatResult") {
-        existingText = `<p><strong></strong> ${result}</p>`;
-		localStorage.setItem('chat', JSON.stringify(result));
+        existingText = `<p><strong></strong> ${convertedResult}</p>`;
+		localStorage.setItem('chat', JSON.stringify(convertedResult));
       } else {
-        existingText = `<p><strong></strong> ${result}</p>`;
-		localStorage.setItem('summary', JSON.stringify(result));
+        existingText = `<p><strong></strong> ${convertedResult}</p>`;
+		localStorage.setItem('summary', JSON.stringify(convertedResult));
       }
 
-      targetElement.innerHTML = existingText;
+      targetElement.innerHTML = convertedResult;
     }
 	
   } //
@@ -341,7 +342,7 @@ console.log("小視窗");
 		  syncPopup(shadow.getElementById("oldChatResult").innerHTML ,"oldChatResult");
 		  syncPopup(shadow.getElementById("chatResult").innerHTML ,"chatResult");
 		  //syncPopup(JSON.parse(localStorage.getItem('circle')) ,"circle");
-		  syncPopup(shadow.getElementById("humanText").innerHTML ,"humanText");
+		  syncPopup(shadow.getElementById("humanText").innerText ,"humanText");
 	  }
   
 
@@ -355,6 +356,25 @@ console.log("小視窗");
 	});
 	return true;
 });
+
+function markdownToHtml(markdown) {
+    if (markdown == null || typeof markdown !== 'string') {
+        return ''; // 或者返回一个默认值
+    }
+	//console.log(markdown);
+    // 将标题转换为 HTML
+    markdown = markdown.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+    markdown = markdown.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+    // 将段落转换为 HTML
+    markdown = markdown.replace(/^(.*$)/gim, '<p>$1</p>');
+    // 将列表转换为 HTML
+    markdown = markdown.replace(/^\* (.*$)/gim, '<li>$1</li>');
+    // 将粗体转换为 HTML
+    markdown = markdown.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // 将换行符转换为 <br>
+    markdown = markdown.replace(/\n/g, '<br>');
+    return markdown;
+}
 
   function processChat() {
 	  console.log(shadow);
@@ -419,10 +439,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === "getData" && checkFloatingWindow()) {
         // 假設你的資料保存在這裡
-        const translation = shadow.getElementById("translationResult").innerText ;
-        const summary = shadow.getElementById("summaryResult").innerText ;
-        const oldChat = shadow.getElementById("oldChatResult").innerText ;
-        const chat = shadow.getElementById("chatResult").innerText ;
+		//console.log('getData');
+        const translation = shadow.getElementById("translationResult").innerHTML ;
+        const summary = shadow.getElementById("summaryResult").innerHTML ;
+        const oldChat = shadow.getElementById("oldChatResult").innerHTML ;
+        const chat = shadow.getElementById("chatResult").innerHTML ;
         sendResponse({ translation: translation , summary: summary , oldChat: oldChat , chat: chat });
     }
 });
