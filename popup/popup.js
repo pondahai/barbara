@@ -378,12 +378,14 @@ const chat = [
           // promptText = "### Assistant: " + context + chatText + "\n### Human: " + humanText + "\n### Assistant:";
 
 		const llmUrl = localStorage.getItem('llmUrl');
+		const modelId = localStorage.getItem('modelId');
 			console.log(chat);
 
 			  chrome.runtime.sendMessage( {
 				action: 'chat',
 				data: chat,
-				llmUrl: llmUrl
+				llmUrl: llmUrl,
+				modelId: modelId
 			  }, () => {
 				// 發送消息後的回調
 				if (chrome.runtime.lastError) {
@@ -398,6 +400,7 @@ const chat = [
 
 chrome.runtime.onMessage.addListener(async function(request, sender, sendResponse) {
 	if(request.action === 'getLlmUrl') {
+		console.log('popup.js getLlmUrl');
 		const llmUrl = localStorage.getItem('llmUrl') | 'localhost';
 		sendResponse({ llmUrl: llmUrl });
 	}
