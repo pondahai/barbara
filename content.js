@@ -4,6 +4,7 @@ console.log("content.js");
 
 let shadow = null;
 let llmUrl = 'localhost';
+let modelId = '';
 
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
  // console.log("content.js Message listened"+request);
@@ -283,7 +284,14 @@ console.log("小視窗");
 		  popupElement.style.top = `${rect.bottom + window.scrollY}px`;
 		  
   } // text length > 0
+	chrome.storage.local.get(['llmUrl', 'modelId'],  function (result) {
+		sendResponse({ llmUrl: result.llmUrl , modelId: result.modelId});
+		llmUrl = result.llmUrl;
+		modelId = result.modelId;
+		console.log('content.js showpopup response llmUrl, modelId');
+	});
   }
+  
   if (request.action === 'updatePopup') {
     const { elementId, result, targetLang } = request.data;
  // console.log("request.data: "+{ elementId, result, targetLang });
@@ -348,12 +356,8 @@ console.log("小視窗");
 
 
   }
-  
+
  // const llmUrl = localStorage.getItem('llmUrl');
-	chrome.storage.local.get(['llmUrl'],  function (result) {
-		sendResponse({ llmUrl: result.llmUrl });
-		llmUrl = result.llmUrl;
-	});
 	return true;
 });
 
@@ -411,7 +415,8 @@ const chat = [
 			  chrome.runtime.sendMessage( {
 				action: 'chat',
 				data: chat,
-				llmUrl: llmUrl
+				llmUrl: llmUrl,
+				modelId: modelId
 			  }, () => {
 				// 發送消息後的回調
 				if (chrome.runtime.lastError) {
@@ -429,7 +434,7 @@ function checkFloatingWindow() {
 }
 
 // 監聽來自 background.js 的訊息
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener(async function(message, sender, sendResponse)  {
     if (message.action === "ping") {
         sendResponse({ status: "ok" });
     }

@@ -1,5 +1,5 @@
 let llmUrl = 'localhost';
-
+let modelId = '';
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -30,24 +30,26 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 		  if (info.menuItemId === "translateToEnglish") {
 			//
 			chrome.tabs.sendMessage(tab.id, { type: "showPopup" }, (response) => {if(chrome.runtime.lastError){}else{
-			llmUrl = response.llmUrl;
-			translateSelectedText(info.selectionText, "en", tab.id);
-			}
+			    llmUrl = response.llmUrl;
+                modelId = response.modelId;
+			    translateSelectedText(info.selectionText, "en", tab.id);
+			  }
 			});
 		  } else if (info.menuItemId === "translateToChinese") {
 			//
 			chrome.tabs.sendMessage(tab.id, { type: "showPopup" }, (response) => {if(chrome.runtime.lastError){}else{
-			llmUrl = response.llmUrl;
-			translateSelectedText(info.selectionText, "zh", tab.id);
-			}
+ 			    llmUrl = response.llmUrl;
+			    modelId = response.modelId;
+				translateSelectedText(info.selectionText, "zh", tab.id);
+			  }
 			});
 		  } else if (info.menuItemId === "summarize") {
 			//
 			chrome.tabs.sendMessage(tab.id, { type: "showPopup" }, (response) => {if(chrome.runtime.lastError){}else{
-			llmUrl = response.llmUrl;
-			console.log("llmUrl:"+llmUrl);
-			summarizeSelectedText(info.selectionText, tab.id);
-			}
+			    llmUrl = response.llmUrl;
+			    modelId = response.modelId;
+				summarizeSelectedText(info.selectionText, tab.id);
+			  }
 			});
 		  }
   
@@ -117,12 +119,13 @@ async function translateSelectedText(selectedText, targetLang, tabid) {
   langCode = targetLang == "zh" ? "translate to "+current_language : "translate to en_US:"
   promptText = format_prompt(""+ langCode + " " + selectedText)
   console.log(promptText);
-const result = await fetch('http://'+llmUrl+':1234/v1/chat/completions', {
+
+const result = await fetch('http://'+llmUrl+'/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
+    body: JSON.stringify({ model: modelId, messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
   })
 
   console.log(promptText)
@@ -173,12 +176,13 @@ const result = await fetch('http://'+llmUrl+':1234/v1/chat/completions', {
 async function summarizeSelectedText(selectedText, tabid) {
 var current_language = navigator.language.toLowerCase() || navigator.browserLanguage.toLowerCase(); //for IE
 promptText = format_prompt("將以下文字做總結，以"+current_language+"回答: " + selectedText)
-  const result = await fetch('http://'+llmUrl+':1234/v1/chat/completions', {
+
+  const result = await fetch('http://'+llmUrl+'/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
+    body: JSON.stringify({ model: modelId, messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
   })
   console.log(promptText)
 
@@ -239,14 +243,16 @@ chrome.runtime.onMessage.addListener(async function(request, sender, sendRespons
 	  console.log("chat");
 	  console.log(request);
 	const promptText = request.data;
+
 	llmUrl = request.llmUrl;
-	console.log('http://'+llmUrl+':1234/v1/chat/completions');
-          const result = await fetch('http://'+llmUrl+':1234/v1/chat/completions', {
+	modelId = request.modelId;
+	console.log('http://'+llmUrl+'/v1/chat/completions');
+          const result = await fetch('http://'+llmUrl+'/v1/chat/completions', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
+            body: JSON.stringify({ model: modelId, messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
           })
           console.log(promptText)
 
@@ -390,7 +396,7 @@ chrome.runtime.onInstalled.addListener(() => {
 	chrome.runtime.sendMessage({ action: "getLlmUrl"}, function(response) {
 	if (chrome.runtime.lastError) {
 	}else{
-		console.log(response);
+		console.log("background.js onInstalled:"+response);
 		if (response && response.llmUrl) {
 			llmUrl = llmUrl;
 		}
