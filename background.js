@@ -1,6 +1,8 @@
 let llmUrl = 'localhost';
 let modelId = '';
 
+
+//
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "translateToEnglish",
@@ -8,9 +10,9 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ["selection"]
   });
   
-var current_language = navigator.language.toLowerCase() || navigator.browserLanguage.toLowerCase(); //for IE
+var current_language = navigator.language || navigator.browserLanguage; //for IE
   chrome.contextMenus.create({
-    id: "translateToChinese",
+    id: "translateToCurrent",
     title: "Translate to "+current_language,
     contexts: ["selection"]
   });
@@ -20,40 +22,68 @@ var current_language = navigator.language.toLowerCase() || navigator.browserLang
     title: "Summarize",
     contexts: ["selection"]
   });
+
+  // chrome.contextMenus.create({
+    // id: "openSidePanel",
+    // title: "Side Panel",
+    // contexts: ["selection"]
+  // });
+
 });
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 	//
 		//
 		tab.id = (tab.id <0)?0:tab.id;
 		console.log("tab.id: "+tab.id);
+
+	chrome.storage.local.get(['llmUrl', 'modelId'],  function (result) {
+		llmUrl = result.llmUrl;
+		modelId = result.modelId;
+
 		  if (info.menuItemId === "translateToEnglish") {
 			//
-			chrome.tabs.sendMessage(tab.id, { type: "showPopup" }, (response) => {if(chrome.runtime.lastError){}else{
-			    llmUrl = response.llmUrl;
-                modelId = response.modelId;
-			    translateSelectedText(info.selectionText, "en", tab.id);
-			  }
-			});
-		  } else if (info.menuItemId === "translateToChinese") {
+            chrome.sidePanel.open({ windowId: tab.windowId });
+
+	langCode = "translate to en_US:";  
+	promptText = format_prompt(""+ langCode + " " + info.selectionText)
+	llamaProcess(promptText, tab.id, "translationResult");
+					// translateSelectedText(info.selectionText, "en", tab.id);
+
+					
+		  } else if (info.menuItemId === "translateToCurrent") {
 			//
-			chrome.tabs.sendMessage(tab.id, { type: "showPopup" }, (response) => {if(chrome.runtime.lastError){}else{
- 			    llmUrl = response.llmUrl;
-			    modelId = response.modelId;
-				translateSelectedText(info.selectionText, "zh", tab.id);
-			  }
-			});
+            chrome.sidePanel.open({ windowId: tab.windowId });
+
+
+	var current_language = navigator.language || navigator.browserLanguage; //for IE
+	langCode = "translate to "+current_language;  
+	promptText = format_prompt(""+ langCode + " " + info.selectionText)
+	llamaProcess(promptText, tab.id, "translationResult");
+					// translateSelectedText(info.selectionText, "zh", tab.id);
+
+					
 		  } else if (info.menuItemId === "summarize") {
 			//
-			chrome.tabs.sendMessage(tab.id, { type: "showPopup" }, (response) => {if(chrome.runtime.lastError){}else{
-			    llmUrl = response.llmUrl;
-			    modelId = response.modelId;
-				summarizeSelectedText(info.selectionText, tab.id);
-			  }
-			});
-		  }
-  
+            chrome.sidePanel.open({ windowId: tab.windowId });
+
+			
+			var current_language = navigator.language.toLowerCase() || navigator.browserLanguage.toLowerCase(); //for IE
+			promptText = format_prompt("將以下文字做總結，以"+current_language+"回答: " + info.selectionText)
+			llamaProcess(promptText, tab.id, "summaryResult");  
+					// summarizeSelectedText(info.selectionText, tab.id);
+					
+		  } else if (info.menuItemId === 'openSidePanel') {
+            // This will open the panel in all the pages on the current window.
+            chrome.sidePanel.open({ windowId: tab.windowId });
+
+			
+          }
+
+  	}); // 
+
    
+
 });
 
 // const chat = [
@@ -112,221 +142,130 @@ function format_prompt(question) {
 
 
 
-async function translateSelectedText(selectedText, targetLang, tabid) {
-    // 加載現有的 LLM URL 設定，並預設為 localhost
-    
-  var current_language = navigator.language.toLowerCase() || navigator.browserLanguage.toLowerCase(); //for IE
-  langCode = targetLang == "zh" ? "translate to "+current_language : "translate to en_US:"
-  promptText = format_prompt(""+ langCode + " " + selectedText)
-  console.log(promptText);
-
-const result = await fetch('http://'+llmUrl+'/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ model: modelId, messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
-  })
-
-  console.log(promptText)
-
-  if(!result.ok){
-    return
-  }
-
-  // 發送消息到 popup.js 轉圈圈
- displayResult(false, 'circle', '', tabid);
-
-  let answer = ''
-  const decoder = new TextDecoder('utf-8');
-
-  for await (const chunk of result.body) {
-    const decodedText = decoder.decode(chunk, { stream: true });
-    // console.log(decodedText);
-
-    if (decodedText.startsWith('data: ')) {
-      const messages = decodedText.split('\n').filter(line => line.trim().startsWith('data: '));
-      for (const message of messages) {
-        if (message.trim() === 'data: [DONE]') break;
-        try {
-          const parsedMessage = JSON.parse(message.trim().substring(6));
-          const { choices } = parsedMessage;
-          if (choices && choices.length > 0) {
-            const content = choices[0].text || choices[0].delta?.content || '';
-            answer += content;
-            displayResult(answer, "translationResult", targetLang, tabid);
-          }
-	  if(parsedMessage.content) {
-            answer += parsedMessage.content;
-            displayResult(answer, "translationResult", targetLang, tabid);
-          }
-        } catch (err) {
-          console.error("Error parsing message:", err);
-        }
-      }
-    }
-  }
-
-
-  // 發送消息到 popup.js 關閉圈圈
- displayResult(true, 'circle', '', tabid);
-
-}
-
-async function summarizeSelectedText(selectedText, tabid) {
-var current_language = navigator.language.toLowerCase() || navigator.browserLanguage.toLowerCase(); //for IE
-promptText = format_prompt("將以下文字做總結，以"+current_language+"回答: " + selectedText)
-
-  const result = await fetch('http://'+llmUrl+'/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ model: modelId, messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
-  })
-  console.log(promptText)
-
-  if(!result.ok){
-    return
-  }
-//
-  // 發送消息到 popup.js 轉圈圈
- displayResult(false, 'circle', '', tabid);
-
-  let answer = ''
-  const decoder = new TextDecoder('utf-8');
-
-  for await (const chunk of result.body) {
-    const decodedText = decoder.decode(chunk, { stream: true });
-    //console.log(decodedText);
-
-    if (decodedText.startsWith('data: ')) {
-      const messages = decodedText.split('\n').filter(line => line.trim().startsWith('data: '));
-      for (const message of messages) {
-        if (message.trim() === 'data: [DONE]') break;
-        try {
-          const parsedMessage = JSON.parse(message.trim().substring(6));
-          const { choices } = parsedMessage;
-          if (choices && choices.length > 0) {
-            const content = choices[0].text || choices[0].delta?.content || '';
-            answer += content;
-            displayResult(answer, "summaryResult", '', tabid);
-          }
-	  if(parsedMessage.content) {
-            answer += parsedMessage.content;
-            displayResult(answer, "summaryResult", '', tabid);
-          }
-        } catch (err) {
-          console.error("Error parsing message:", err);
-        }
-      }
-    }
-  }
-
-  // 發送消息到 popup.js 關閉圈圈
- displayResult(true, 'circle', '', tabid);
-
-
-// answer += decoder.decode(); 
-// console.log(answer)
-
-//      console.log("result:", answer)
-//      displayResult(answer, "summaryResult")
-  
-}
 
 chrome.runtime.onMessage.addListener(async function(request, sender, sendResponse) {
     // 加載現有的 LLM URL 設定，並預設為 localhost
-	
-// console.log("");
-  if (request.action === 'chat') {
-	  console.log("chat");
-	  console.log(request);
-	const promptText = request.data;
-
+  if (request.action === 'translate') {
+	var current_language = navigator.language || navigator.browserLanguage; //for IE
+	langCode = request.isEn ?  "translate to "+current_language : "translate to en_US:";
+	promptText = format_prompt(""+ langCode + " " + request.data)
+	  
 	llmUrl = request.llmUrl;
 	modelId = request.modelId;
-	console.log('http://'+llmUrl+'/v1/chat/completions');
-          const result = await fetch('http://'+llmUrl+'/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ model: modelId, messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:"], max_tokens: 2048})
-          })
-          console.log(promptText)
+    chrome.sidePanel.open({ windowId: sender.tab.windowId });
+	
+	llamaProcess(promptText, sender.tab.id, "translationResult");
+  }
+  
+  if (request.action === 'summary') {
+	var current_language = navigator.language.toLowerCase() || navigator.browserLanguage.toLowerCase(); //for IE
+	promptText = format_prompt("將以下文字做總結，以"+current_language+"回答: " + request.data);
+	
+	llmUrl = request.llmUrl;
+	modelId = request.modelId;
+    chrome.sidePanel.open({ windowId: sender.tab.windowId });
+	llamaProcess(promptText, sender.tab.id, "summaryResult");  
+  }
+  
+// console.log("");
+  if (request.action === 'chat') {
+	  // console.log("chat");
+	  // console.log(request);
+		llmUrl = request.llmUrl;
+		modelId = request.modelId;
 
-          if(!result.ok){
-            return
-          }
-          //
-          // 發送消息到 popup.js 轉圈圈
-          displayResult(false, 'circle', '', (sender.tab)?sender.tab.id:0);
+		const promptText = request.data;
 
-          let answer = ''
-          const decoder = new TextDecoder('utf-8');
-
-          for await (const chunk of result.body) {
-            const decodedText = decoder.decode(chunk, { stream: true });
-            //console.log(decodedText);
-
-            if (decodedText.startsWith('data: ')) {
-              const messages = decodedText.split('\n').filter(line => line.trim().startsWith('data: '));
-              for (const message of messages) {
-                if (message.trim() === 'data: [DONE]') break;
-                try {
-                const parsedMessage = JSON.parse(message.trim().substring(6));
-                const { choices } = parsedMessage;
-                if (choices && choices.length > 0) {
-                  const content = choices[0].text || choices[0].delta?.content || '';
-                  answer += content;
-                  displayResult(answer, "chatResult", '', (sender.tab)?sender.tab.id:0);
-                }
-	              if(parsedMessage.content) {
-                    answer += parsedMessage.content;
-                    displayResult(answer, "chatResult", '', (sender.tab)?sender.tab.id:0);
-                  }
-               } catch (err) {
-                 console.error("Error parsing message:", err);
-               }
-             } // for message
-           } // start with data:
-         } // for chunk
-
-          // 發送消息到 popup.js 關閉圈圈
-          displayResult(true, 'circle', '', (sender.tab)?sender.tab.id:0);
-	  
+		llamaProcess(promptText, (sender.tab)?sender.tab.id:0, "chatResult");    
   }
 
+  if (request.action === 'getClipboard') {
+    navigator.clipboard.readText()
+      .then(text => {
+        sendResponse({ text });
+      })
+      .catch(err => {
+        console.error('Failed to read clipboard: ', err);
+        sendResponse({ error: 'Clipboard read error' });
+      });
+    return true; // Indicate asynchronous response
+  }
 	
 	
 });
 
-function syncPopup(result, elementId) {
-  // console.log(result +","+ elementId +","+ targetLang +","+ tabid);
+async function llamaProcess(promptText, tabId, objElement) {
+	// const eventTarget = new EventTarget();
+	  // 發送消息到 popup.js 轉圈圈
+	  displayResult(false, 'circle', '', tabId);
+	  
+        const controller = new AbortController();
+		
+	try {
+	  
+        // const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超時
+	
 
-  // 構造要發送的數據
-  const data = {
-    elementId: elementId,
-    result: result,
-    targetLang: "zh"
-  };
+          const response = await fetch('http://'+llmUrl+'/v1/chat/completions', {
+          // const response = await fetch('http://'+llmUrl+'/completion', {
+            signal: controller.signal,
+			// keepalive: true,
+            method: 'POST',
+            headers: {
+			  'Connection': 'keep-alive',
+              'Content-Type': 'application/json',
+			  'Accept': 'text/event-stream'
+            },
+			// body: JSON.stringify({ model: modelId, messages: promptText, prompt: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:", "User:"], max_tokens: 8192, cache_prompt: true, slot_id: undefined})
+            body: JSON.stringify({   stream: true, messages: promptText})
+			
+          });
+          // console.log(promptText)
+		  
+		  let answer = '';
+		if (response.ok) {		
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder('utf-8');
+			let done = false;
+			while (!done) {
+				const { value, done: readerDone } = await reader.read();
+				done = readerDone;
+				
+				// console.log('Received chunk:', decoder.decode(value, { stream: !done }));
+				const decodedText = decoder.decode(value, { stream: !done });
+				if (decodedText.startsWith('data: ')) {
+				  const messages = decodedText.split('\n').filter(line => line.trim().startsWith('data: '));
+				  for (const message of messages) {
+					if (message.trim() === 'data: [DONE]') break;
+					
+					const parsedMessage = JSON.parse(message.trim().substring(6));
+					const { choices } = parsedMessage;
+					if (choices && choices.length > 0) {
+					  const content = choices[0].text || choices[0].delta?.content || '';
+					  answer += content;
+					  displayResult(answer, objElement, '', tabId);
+					}
+					  if(parsedMessage.content) {
+						answer += parsedMessage.content;
+						displayResult(answer, objElement, '', tabId);
+					  }
 
-  // 廣播消息 popup.js 跟 content.js 都會接收
-  chrome.runtime.sendMessage( {
-    action: 'updatePopup',
-    data: data
-  }, () => {
-    // 發送消息後的回調
-    if (chrome.runtime.lastError) {
-    //  console.error('Error sending message to popup:', chrome.runtime.lastError);
-    } else {
-    //  console.log('Message sent to popup');
-    }
-  });
+				  } // for message
+				} // start with data:				
+			}		
+		} else {
+			console.error('Response error:', response.statusText);
+		}
 
-  
+    } catch (err) {
+	 console.error("Error parsing message:", err);
+    } finally {
+    controller.abort();
+  }
+  // 發送消息到 popup.js 關閉圈圈
+  displayResult(true, 'circle', '', tabId);
 }
+
 function displayResult(result, elementId, targetLang, tabid) {
   // console.log(result +","+ elementId +","+ targetLang +","+ tabid);
 
@@ -374,8 +313,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-	console.log(message.action);
+	// console.log("background.js:"+message.action);
     if (message.action === "checkContentScript") {
+		// Send a message to the content script
+		chrome.runtime.sendMessage({ action: 'sidePanelOpen' });
+		
         chrome.tabs.sendMessage(message.tabId, { action: "ping" }, function(response) {
             if (chrome.runtime.lastError) {
                 sendResponse({ injected: false });
@@ -416,4 +358,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ llmUrl: llmUrl });
         return true; // 表示將進行非同步回應
     }
+});
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'sidePanelOpen') {
+  // Send a message to the content script
+  console.log("background.js sidePanelOpen and showToolbar");
+  chrome.runtime.sendMessage({ action: 'showToolbar' });
+  }
 });

@@ -1,0 +1,115 @@
+/* styles.css */
+#chrome-extension-toolbar {
+  /* justify-content: center;	 */
+    /* display: inline-block; */
+    justify-content: space-evenly;
+  
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 50px;
+  height: 36px;
+  background-color: rgba(250, 250, 0, 0.5);
+  border-radius: 8px 0 0 8px;
+  transition: width 0.3s;
+  vertical-align: middle;
+  /* overflow: hidden; */
+  z-index: 10000;
+}
+.toolbar-icon {
+  cursor: pointer;
+  padding: 0px;
+}
+.toolbar-content {
+  display: none;
+  padding: 0px;
+}
+
+#chrome-extension-toolbar.expanded .toolbar-content {
+  display: block;
+}
+
+#chrome-extension-toolbar.expanded .toolbar-icon {
+  display: none;
+}
+
+#chrome-extension-toolbar.expanded {
+  width: 150px;
+}
+
+#chrome-extension-toolbar.visible {
+  opacity: 1;
+}
+
+#chrome-extension-toolbar .toolbar-content {
+  /* display: flex; */
+  /* flex-direction: column; */
+  /* align-items: center; */
+  /* padding: 10px 5px; */
+}
+
+#chrome-extension-toolbar button {
+  margin: 0;
+  border: none;
+  padding: 0px;
+  background: transparent;
+  /* color: white; */
+  /* font-size: 12px; */
+  cursor: pointer;
+}
+
+#chrome-extension-toolbar  img {
+  margin: 0;
+  border: 0;
+  padding: 0px;
+  /* margin-right: 8px; */
+  width: 24px;
+  height: 24px;
+  animation: fadeIn 0.1s;
+}
+
+#tool_head, #tool_translate, #tool_summary, #tool_handle {
+  display: inline-block;
+}
+
+
+#tool_handle {
+  margin: 0;
+  padding: 0px 0px 0px 0px;
+  
+  border-right: 6px double white;
+  
+  height: 24px;
+
+}
+
+#close-toolbar {
+font-family: Arial, sans-serif;
+color: black; /強制字型顏色為白色/
+text-align: center; /將文字置中/
+position: absolute;
+width: 20px;
+height: 20px;
+border-radius: 50%;
+background-color: white;
+cursor: pointer;
+}
+
+.gray-circle {
+position: absolute;
+top: -7.5px; left: -3px;
+width: 35px;
+height: 35px;
+border-radius: 50%;
+background-color: #ccc;
+box-shadow: inset 0 0 5px rgba(0,0,0,0.3);
+display: inline-block; /* 增加這個屬性 */
+}
+
+.close-toolbar-container {
+position: relative;
+text-align: center;
+}
+
+

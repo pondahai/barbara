@@ -55,6 +55,13 @@ function fetchUrl(url) {
 		  modelId = firstModelId;
 		  localStorage.setItem('modelId', modelId);
 		  chrome.storage.local.set({modelId: modelId}, function () {alert('LLM URL 已保存');});
+		  // update status
+		  document.getElementById('status_box').style.borderWidth="1px";
+		  document.getElementById('status_box').style.borderStyle="solid";
+		  document.getElementById('status_title').innerHTML="<h2>狀態</h2>";
+		  document.getElementById('llmurl').innerHTML="<p>找到的伺服器:"+llmUrl+"</p>";
+		  document.getElementById('modelname').innerHTML="<p>模型名稱:"+modelId+"</p>";
+		  //
 		} else {
 		  console.error('所有請求都失敗了');
 		}
@@ -62,40 +69,51 @@ function fetchUrl(url) {
 		console.error('發生錯誤：', error);
 	  }
 	}
+document.addEventListener('load', function() {
+	// const llmUrlInput1 = document.getElementById('llm-url-1');
+	// const llmUrlInput2 = document.getElementById('llm-url-2');
+	// const llmUrlInput3 = document.getElementById('llm-url-3');
 
+	// const urls = [llmUrlInput1.value, llmUrlInput2.value, llmUrlInput3.value];
+	// fetchAndCompare(urls);	
+});
 document.addEventListener('DOMContentLoaded', function() {
     const saveButton = document.getElementById('save');
     const resetButton = document.getElementById('reset');
 	const llmUrlInput1 = document.getElementById('llm-url-1');
 	const llmUrlInput2 = document.getElementById('llm-url-2');
 	const llmUrlInput3 = document.getElementById('llm-url-3');
-	
+
 
 	chrome.storage.local.get(['llmUrl1'], async function (result) {
 		let llmUrl1 = result.llmUrl1 || 'localhost:1234';
 		 llmUrlInput1.value = llmUrl1;
 		localStorage.setItem('llmUrl1', llmUrl1);
 		 chrome.storage.local.set({llmUrl1: llmUrl1}, function () {alert('LLM URL 已保存');});
-		const urls = [llmUrlInput1.value];
-		fetchAndCompare(urls);
+		//const urls = [llmUrlInput1.value];
+		//fetchAndCompare(urls);
 	});
 	chrome.storage.local.get(['llmUrl2'], async function (result) {
-		let llmUrl2 = result.llmUrl2 || 'ubuntu:1234';
+		let llmUrl2 = result.llmUrl2 || 'localhost:11434';
 		 llmUrlInput2.value = llmUrl2;
 		localStorage.setItem('llmUrl2', llmUrl2);
 		 chrome.storage.local.set({llmUrl2: llmUrl2}, function () {alert('LLM URL 已保存');});
-		const urls = [llmUrlInput2.value];
-		fetchAndCompare(urls);
+		//const urls = [llmUrlInput2.value];
+		//fetchAndCompare(urls);
 	});
 	chrome.storage.local.get(['llmUrl3'], async function (result) {
 		let llmUrl3 = result.llmUrl3 || 'raspberrypi.local:1234';
 		 llmUrlInput3.value = llmUrl3;
 		localStorage.setItem('llmUrl3', llmUrl3);
 		 chrome.storage.local.set({llmUrl3: llmUrl3}, function () {alert('LLM URL 已保存');});
-		const urls = [llmUrlInput3.value];
-		fetchAndCompare(urls);
+		//const urls = [llmUrlInput3.value];
+		//fetchAndCompare(urls);
 	});
 
+	setTimeout(function () {
+		const urls = [llmUrlInput1.value, llmUrlInput2.value, llmUrlInput3.value];
+		fetchAndCompare(urls);	
+	}, 1000)
 
     // 保存新的 LLM URL 設定
     saveButton.addEventListener('click', function() {
@@ -120,7 +138,7 @@ document.addEventListener('DOMContentLoaded', function() {
         llmUrlInput1.value = 'localhost:1234';
 		localStorage.setItem('llmUrl1', llmUrlInput2.value);
 		chrome.storage.local.set({llmUrl1: llmUrlInput1.value}, function () {});
-        llmUrlInput2.value = 'ubuntu:1234';
+        llmUrlInput2.value = 'localhost:11434';
 		localStorage.setItem('llmUrl2', llmUrlInput2.value);
 		chrome.storage.local.set({llmUrl2: llmUrlInput2.value}, function () {});
         llmUrlInput3.value = 'raspberrypi.local:1234';

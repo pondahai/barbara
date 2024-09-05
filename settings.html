@@ -28,6 +28,11 @@
 	<script src="settings.js" defer></script>
 </head>
 <body>
+    <div id="status_box" class="section">
+		<div id="status_title">正在尋找伺服器...</div>
+		<div id="llmurl"></div>
+		<div id="modelname"></div>
+	</div>
     <div class="section">
         <h1>Barbara 簡介</h1>
         <p>Barbara 是一款 Chrome 擴充工具，利用本地運行的大語言模型（如 LMStudio 或 llama.cpp），提供雙語翻譯、文章摘要及互動聊天功能。這款工具能夠在本地電腦上執行，確保您的數據隱私。</p>
@@ -48,11 +53,14 @@
         <p>完成這些步驟後，您就可以在 Barbara 中使用翻譯、摘要和聊天功能了！</p>
         <h3>步驟 4: 設定伺服器位址</h3>
 		<p>預設伺服器位在本機，因此預設位址會是localhost。但如果是在其他地方，這裡可以設定位址。例如LLM安裝在樹莓派，則這裡可能可以設定為raspberrypi.local。</p>
-    <label for="llm-url">LLM 所在網址:</label>
-    <input type="text" id="llm-url">:1234
+    <label form="llm-url">LLM 所在網址候選:
+	<br>
+    <input type="text" id="llm-url-1">
+    <input type="text" id="llm-url-2">
+    <input type="text" id="llm-url-3">
     <button id="save">保存</button>
-    <button id="reset">重置為 localhost</button>
-		
+    <button id="reset">重置</button>
+		</label>
     </div>
 
 </body>
