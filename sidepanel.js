@@ -1,5 +1,8 @@
 console.log("Popup.js script loaded");
 import './marked.min.js';
+let llmUrl = '';
+let modelId = '';
+let apiKey = '';
 
       // 作為確認
       const existingPopup = document.getElementById('popup');
@@ -163,9 +166,22 @@ console.log("小視窗");
 
   </style>
 
-  
-    <h1 id="animatedText"><div>B</div><div>a</div><div>r</div><div>b</div><div>a</div><div>r</div><div>a</div></h1>
-    <div class="loader" id="circle" hidden></div>
+    <table>
+	  <tr> 
+	    <td rowspan="2">
+          <h1 id="animatedText"><div>B</div><div>a</div><div>r</div><div>b</div><div>a</div><div>r</div><div>a</div></h1>
+        </td>
+		<td>
+		  🌐<div id="serverUrl"></div>
+		</td>
+	  </tr>
+	  <tr>
+	   <td>
+	      🧠<div id="modelId"></div>
+	   </td>
+	  </tr>
+	</table>
+	<div class="loader" id="circle" hidden></div>
     <h2>Translation</h2>
     <div class="aiTextBox" id="translationResult"></div>
 
@@ -213,16 +229,25 @@ console.log("小視窗");
       //
         var key = window.event.keyCode;
 
-        // If the user has pressed enter
-        if (key === 13) {
+		// If the user has pressed enter
+		if (key === 13) {
+			if (event.shiftKey) {
+				// If Shift + Enter is pressed, insert a new line
+				var textarea = document.getElementById('humanText');
+				var start = textarea.selectionStart;
+				var end = textarea.selectionEnd;
+				var value = textarea.value;
 
-		  processChat();
+				textarea.value = value.substring(0, start) + '\n' + value.substring(end);
+				textarea.selectionStart = textarea.selectionEnd = start + 1;
 
-          return false;
-        } // enter key pressed 
-        else {
-          return true;
-        }
+				event.preventDefault();
+			} else {
+				// If only Enter is pressed, process the chat
+				processChat();
+				event.preventDefault();
+			}
+		}
   
 
       }); // keypress
@@ -289,6 +314,15 @@ function  markdownToHtml(markdown) {
 }
 	  
 document.addEventListener('DOMContentLoaded', function() {
+	chrome.storage.local.get(['llmUrl', 'modelId', 'apiKey'],  function (result) {
+		llmUrl = result.llmUrl;
+		modelId = result.modelId;
+		apiKey = result.apiKey;
+		var modelNamePos = modelId.lastIndexOf('\\');
+		document.getElementById("serverUrl").innerText = llmUrl;
+		document.getElementById("modelId").innerText = (modelNamePos != -1)?modelId.substring(modelNamePos + 1):modelId;
+	});		
+	
     chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
         // 向 background.js 發送訊息，確認 content script 是否已注入
         chrome.runtime.sendMessage({ action: "checkContentScript", tabId: tabs[0].id }, function(response) {
@@ -375,15 +409,16 @@ const chat = [
 ];
           // promptText = "### Assistant: " + context + chatText + "\n### Human: " + humanText + "\n### Assistant:";
 
-		const llmUrl = localStorage.getItem('llmUrl');
-		const modelId = localStorage.getItem('modelId');
+		// const llmUrl = localStorage.getItem('llmUrl');
+		// const modelId = localStorage.getItem('modelId');
 			console.log(chat);
 
 			  chrome.runtime.sendMessage( {
 				action: 'chat',
 				data: chat,
 				llmUrl: llmUrl,
-				modelId: modelId
+				modelId: modelId,
+				apiKey: apiKey
 			  }, () => {
 				// 發送消息後的回調
 				if (chrome.runtime.lastError) {
@@ -399,8 +434,10 @@ const chat = [
 chrome.runtime.onMessage.addListener(async function(request, sender, sendResponse) {
 	if(request.action === 'getLlmUrl') {
 		console.log('popup.js getLlmUrl');
-		const llmUrl = localStorage.getItem('llmUrl') | 'localhost';
+		// const llmUrl = localStorage.getItem('llmUrl') | 'localhost';
 		sendResponse({ llmUrl: llmUrl });
 	}
 	return true;
 });
+
+

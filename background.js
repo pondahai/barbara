@@ -1,6 +1,6 @@
 let llmUrl = 'localhost';
 let modelId = '';
-
+let apiKey = '';
 
 //
 chrome.runtime.onInstalled.addListener(() => {
@@ -37,15 +37,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 		tab.id = (tab.id <0)?0:tab.id;
 		console.log("tab.id: "+tab.id);
 
-	chrome.storage.local.get(['llmUrl', 'modelId'],  function (result) {
+	chrome.storage.local.get(['llmUrl', 'modelId', 'apiKey'],  function (result) {
 		llmUrl = result.llmUrl;
 		modelId = result.modelId;
-
+		apiKey = result.apiKey;
+		
 		  if (info.menuItemId === "translateToEnglish") {
 			//
             chrome.sidePanel.open({ windowId: tab.windowId });
 
-	langCode = "translate to en_US:";  
+	langCode = "translate to en_US, please:";  
 	promptText = format_prompt(""+ langCode + " " + info.selectionText)
 	llamaProcess(promptText, tab.id, "translationResult");
 					// translateSelectedText(info.selectionText, "en", tab.id);
@@ -57,7 +58,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 
 	var current_language = navigator.language || navigator.browserLanguage; //for IE
-	langCode = "translate to "+current_language;  
+	langCode = "translate to "+current_language+ ", please :";  
 	promptText = format_prompt(""+ langCode + " " + info.selectionText)
 	llamaProcess(promptText, tab.id, "translationResult");
 					// translateSelectedText(info.selectionText, "zh", tab.id);
@@ -142,9 +143,8 @@ function format_prompt(question) {
 
 
 
-
 chrome.runtime.onMessage.addListener(async function(request, sender, sendResponse) {
-    // 加載現有的 LLM URL 設定，並預設為 localhost
+
   if (request.action === 'translate') {
 	var current_language = navigator.language || navigator.browserLanguage; //for IE
 	langCode = request.isEn ?  "translate to "+current_language : "translate to en_US:";
@@ -152,6 +152,7 @@ chrome.runtime.onMessage.addListener(async function(request, sender, sendRespons
 	  
 	llmUrl = request.llmUrl;
 	modelId = request.modelId;
+	apiKey = request.apiKey;
     chrome.sidePanel.open({ windowId: sender.tab.windowId });
 	
 	llamaProcess(promptText, sender.tab.id, "translationResult");
@@ -163,6 +164,7 @@ chrome.runtime.onMessage.addListener(async function(request, sender, sendRespons
 	
 	llmUrl = request.llmUrl;
 	modelId = request.modelId;
+	apiKey = request.apiKey;
     chrome.sidePanel.open({ windowId: sender.tab.windowId });
 	llamaProcess(promptText, sender.tab.id, "summaryResult");  
   }
@@ -173,7 +175,8 @@ chrome.runtime.onMessage.addListener(async function(request, sender, sendRespons
 	  // console.log(request);
 		llmUrl = request.llmUrl;
 		modelId = request.modelId;
-
+		apiKey = request.apiKey;
+		
 		const promptText = request.data;
 
 		llamaProcess(promptText, (sender.tab)?sender.tab.id:0, "chatResult");    
@@ -194,76 +197,206 @@ chrome.runtime.onMessage.addListener(async function(request, sender, sendRespons
 	
 });
 
+async function* readAll(reader, tabId, objElement) {	  
+		  let answer = '';
+		// if (response.ok) {		
+			// const reader = body.getReader();
+			const decoder = new TextDecoder('utf-8');
+			// let done = false;
+
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const decodedText = decoder.decode(value, { stream: !done });
+
+    // 將新的資料加入 buffer
+    buffer += decodedText;
+
+    // 嘗試分離完整的 JSON 封包
+    while (buffer.length > 0) {
+      try {
+        // 檢查是否有完整的 JSON 封包
+        const lineEndIndex = buffer.indexOf('\n');
+        if (lineEndIndex !== -1) {
+          const line = buffer.slice(0, lineEndIndex).trim();
+          buffer = buffer.slice(lineEndIndex + 1); // 去除已解析的部分
+
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6); // 去除 'data: ' 前綴
+
+            // 檢查是否是結束標誌
+            if (jsonStr === '[DONE]') {
+              // yield { done: true };
+              break;
+            }
+
+            // 嘗試解析 JSON
+            const jsonObj = JSON.parse(jsonStr);
+
+            // 處理 choices
+            const { choices } = jsonObj;
+            if (choices && choices.length > 0) {
+              const content = choices[0].text || choices[0].delta?.content || '';
+              answer += content;
+              yield answer;
+            }
+
+            // 處理 parsedMessage.content
+            const parsedMessage = jsonObj;
+            if (parsedMessage.content) {
+              answer += parsedMessage.content;
+              yield answer;
+            }
+          }
+        } else {
+          // 如果沒有找到換行符，說明資料不完整，等待下一次讀取
+          break;
+        }
+      } catch (e) {
+        // 如果解析失敗，說明資料不完整，等待下一次讀取
+        break;
+      }
+    }
+  }
+			
+			// while (true) {
+				// const {  done, value } = await reader.read();
+				// // done = readerDone;
+				// if (done) break;
+				// // console.log('Received chunk:', decoder.decode(value, { stream: !done }));
+				// const decodedText = decoder.decode(value, { stream: !done });
+				// if (decodedText.startsWith('data: ')) {
+				  // const messages = decodedText.split('\n').filter(line => line.trim().startsWith('data: '));
+				  // for (const message of messages) {
+					// if (message.trim() === 'data: [DONE]') break;
+					
+					// const parsedMessage = JSON.parse(message.trim().substring(6));
+					// const { choices } = parsedMessage;
+					// if (choices && choices.length > 0) {
+					  // const content = choices[0].text || choices[0].delta?.content || '';
+					  // answer += content;
+					  // // displayResult(answer, objElement, '', tabId);
+					  // yield answer;
+					// }
+					// if(parsedMessage.content) {
+					  // answer += parsedMessage.content;
+					  // // displayResult(answer, objElement, '', tabId);
+					  // yield answer;
+					// }
+
+				  // } // for message
+				// } // start with data:
+
+
+			// } // while(!done)		
+		// } else {
+			// console.error('Response error:', response.statusText);
+		// }
+		return answer;
+}	
+
+
 async function llamaProcess(promptText, tabId, objElement) {
-	// const eventTarget = new EventTarget();
-	  // 發送消息到 popup.js 轉圈圈
-	  displayResult(false, 'circle', '', tabId);
 	  
-        const controller = new AbortController();
 		
 	try {
-	  
-        // const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超時
-	
-
-          const response = await fetch('http://'+llmUrl+'/v1/chat/completions', {
-          // const response = await fetch('http://'+llmUrl+'/completion', {
-            signal: controller.signal,
-			// keepalive: true,
+		////
+		let promptString = '';
+		promptText.forEach(item => {
+        // 將物件的 role 和 content 組合起來，並添加到結果字串中
+          promptString += `${item.role}:' ${item.content} `;
+        });
+		////
+		const jsonData = JSON.stringify({
+			model: modelId,
+			// cache_prompt: true,
+			stop: ["</s>", "Llama:", "User:"],
+			stream: true,
+			messages: promptText,
+			max_tokens: 8000
+		});
+		////
+		const blob = new Blob([jsonData], { type: 'application/json' });
+		////
+		// Use a custom TransformStream to track upload progress
+		const progressTrackingStream = new TransformStream({
+			transform(chunk, controller) {
+			  controller.enqueue(chunk);
+			  bytesUploaded += chunk.byteLength;
+			  console.log("upload progress:", bytesUploaded / totalBytes);
+			  // uploadProgress.value = bytesUploaded / totalBytes;
+			},
+			flush(controller) {
+			  console.log("completed stream");
+			},
+		});
+		////
+	// (async ()=> {
+         const response =  await fetch(llmUrl+'/v1/chat/completions', {
+          // await fetch('http://'+llmUrl+'/completion', {
+            // signal: controller.signal,
             method: 'POST',
             headers: {
+			  'Authorization': `Bearer ${apiKey}`,
 			  'Connection': 'keep-alive',
               'Content-Type': 'application/json',
 			  'Accept': 'text/event-stream'
             },
-			// body: JSON.stringify({ model: modelId, messages: promptText, prompt: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:", "User:"], max_tokens: 8192, cache_prompt: true, slot_id: undefined})
-            body: JSON.stringify({   stream: true, messages: promptText})
+			// body: JSON.stringify({ model: modelId, messages: promptText, stream: true, stop: ["## Step", "### Assistant:", "### Human:", "\n### Human:", "User:"], max_tokens: 8192, cache_prompt: true, slot_id: undefined})
 			
-          });
-          // console.log(promptText)
-		  
-		  let answer = '';
-		if (response.ok) {		
-			const reader = response.body.getReader();
-			const decoder = new TextDecoder('utf-8');
-			let done = false;
-			while (!done) {
-				const { value, done: readerDone } = await reader.read();
-				done = readerDone;
-				
-				// console.log('Received chunk:', decoder.decode(value, { stream: !done }));
-				const decodedText = decoder.decode(value, { stream: !done });
-				if (decodedText.startsWith('data: ')) {
-				  const messages = decodedText.split('\n').filter(line => line.trim().startsWith('data: '));
-				  for (const message of messages) {
-					if (message.trim() === 'data: [DONE]') break;
-					
-					const parsedMessage = JSON.parse(message.trim().substring(6));
-					const { choices } = parsedMessage;
-					if (choices && choices.length > 0) {
-					  const content = choices[0].text || choices[0].delta?.content || '';
-					  answer += content;
-					  displayResult(answer, objElement, '', tabId);
-					}
-					  if(parsedMessage.content) {
-						answer += parsedMessage.content;
-						displayResult(answer, objElement, '', tabId);
-					  }
+            // body: JSON.stringify({stop: ["</s>", "Llama:", "User:"], repeat_penalty: 1.18, frequency_penalty: 0, penalize_nl: false, presence_penalty: 0, stream: true, prompt: promptString }),
 
-				  } // for message
-				} // start with data:				
-			}		
-		} else {
-			console.error('Response error:', response.statusText);
-		}
+			body: jsonData,
+			
+            // body: blob.stream().pipeThrough(progressTrackingStream),
+			duplex: "half"
+			
+			
 
+			// body: bodyStream, // 使用 ReadableStream 作为请求体
+            // duplex: 'full' // 添加 duplex 选项
+
+          })
+		  .then(response => {
+			if (!response.ok) {
+			  throw new Error('Network response was not ok');
+			}
+			return response.body; // 返回一個 ReadableStream
+		  })
+		  .then(body => {
+			console.log('call readAll');
+			  // 發送消息到 popup.js 轉圈圈
+			  displayResult(false, 'circle', '', tabId);
+			const reader = body.getReader();
+			// return readAll(reader, tabId, objElement); // 輔助函數，用於讀取所有數據
+			(async ()=> {
+			  for await (const answer of readAll(reader, tabId, objElement)) {
+				  displayResult(answer, objElement, '', tabId);
+			  }
+			  // 發送消息到 popup.js 關閉圈圈
+			  displayResult(true, 'circle', '', tabId);
+			
+			})();
+			return "";
+		  })
+		  .then(result => {
+			console.log('所有數據：', result);
+		  })
+		  .catch(error => {
+			console.error('發生錯誤：', error);
+		  });
+
+		// })();
+		
     } catch (err) {
+
 	 console.error("Error parsing message:", err);
     } finally {
-    controller.abort();
-  }
-  // 發送消息到 popup.js 關閉圈圈
-  displayResult(true, 'circle', '', tabId);
+      // controller.abort();
+    }
 }
 
 function displayResult(result, elementId, targetLang, tabid) {
@@ -301,6 +434,65 @@ function displayResult(result, elementId, targetLang, tabid) {
 	}
   });	  
 }
+
+
+
+///////
+let answer = '';
+function llamaProcess_xxx(promptText, tabId, objElement){
+	const xhr = new XMLHttpRequest();
+    answer = '';
+	// 初始化請求
+	xhr.open('POST', 'http://'+llmUrl+'/v1/chat/completions', true);
+	xhr.setRequestHeader('Content-Type', 'application/json');
+	xhr.setRequestHeader('Authorization', 'Bearer YOUR_OPENAI_API_KEY');
+
+	// 處理流式回應
+	xhr.onprogress = function () {
+		// 將目前收到的回應片段處理
+		if (xhr.readyState === 3) {
+			const responseText = xhr.responseText;
+			// 分段處理收到的資料
+			processStreamData(responseText, tabId, objElement);
+		}
+	};
+
+	// 處理完成的請求
+	xhr.onload = function () {
+		if (xhr.status === 200) {
+			console.log('Request completed successfully');
+			const response = xhr.responseText;
+			// 處理最終完整的回應
+			handleCompleteResponse(response, tabId, objElement);
+		} else {
+			console.error('Error: ', xhr.statusText);
+		}
+	};
+
+	// 發送請求
+	const data = {
+		model: 'gpt-3.5-turbo',
+		messages: promptText,
+		stream: true // 啟用流式回應
+	};
+	xhr.send(JSON.stringify(data));
+}
+// 處理流式回應的函數
+function processStreamData(data, tabId, objElement) {
+    console.log('Streaming data:', data);
+    // 可在此處做即時處理，像是更新 UI 或追加訊息
+	answer += data;
+	displayResult(answer, objElement, '', tabId);
+}
+
+// 處理完整回應的函數
+function handleCompleteResponse(response, tabId, objElement) {
+    console.log('Final response:', response);
+	answer += data;
+	displayResult(answer, objElement, '', tabId);
+}
+
+//////
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "checkWindow" || message.action === "getData") {

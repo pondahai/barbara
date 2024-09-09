@@ -32,6 +32,9 @@
 		<div id="status_title">正在尋找伺服器...</div>
 		<div id="llmurl"></div>
 		<div id="modelname"></div>
+	  <select id="modelSelect">
+		<!-- 模型選項將在這裡生成 -->
+	  </select>
 	</div>
     <div class="section">
         <h1>Barbara 簡介</h1>
@@ -54,12 +57,15 @@
         <h3>步驟 4: 設定伺服器位址</h3>
 		<p>預設伺服器位在本機，因此預設位址會是localhost。但如果是在其他地方，這裡可以設定位址。例如LLM安裝在樹莓派，則這裡可能可以設定為raspberrypi.local。</p>
     <label form="llm-url">LLM 所在網址候選:
-	<br>
-    <input type="text" id="llm-url-1">
-    <input type="text" id="llm-url-2">
-    <input type="text" id="llm-url-3">
-    <button id="save">保存</button>
-    <button id="reset">重置</button>
+	<pre>
+	<br>候選1    位址<input type="text" id="llm-url-1"></input>
+    <br>候選1 API KEY<input type="text" id="llm-url-1-apikey"></input>
+    <br>候選2    位址<input type="text" id="llm-url-2"></input>
+    <br>候選2 API KEY<input type="text" id="llm-url-2-apikey"></input>
+    <br>候選3    位址<input type="text" id="llm-url-3"></input>
+    <br>候選3 API KEY<input type="text" id="llm-url-3-apikey"></input>
+    <br><button id="save">保存</button><button id="reset">重置</button>
+	</pre>
 		</label>
     </div>
 

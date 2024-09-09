@@ -1,4 +1,5 @@
 // content.js
+// 網頁右邊的小標籤
 const iconHead = chrome.runtime.getURL("icon.png");
 const iconLang = chrome.runtime.getURL("lang.gif");
 const iconSummary = chrome.runtime.getURL("summary.gif");
@@ -28,7 +29,7 @@ document.body.appendChild(toolbar);
 let isDragging = false;
 let startY, startTop;
 
-function sendMsgTranslate(sel_text, llmUrl, modelId) {
+function sendMsgTranslate(sel_text, llmUrl, modelId, apiKey) {
 	    const textCount = sel_text.length;
 		// 匹配中文
 		const chineseRegex = /[\u4e00-\u9fa5]/g;
@@ -44,6 +45,7 @@ function sendMsgTranslate(sel_text, llmUrl, modelId) {
 			data: sel_text,
 			llmUrl: llmUrl,
 			modelId: modelId,
+			apiKey: apiKey,
 			isEn: isEn
 		}, () => {
 		// 發送消息後的回調
@@ -55,9 +57,11 @@ function sendMsgTranslate(sel_text, llmUrl, modelId) {
 		});
 }
 document.getElementById('translate-btn').addEventListener('click', () => {
-	chrome.storage.local.get(['llmUrl', 'modelId'],  function (result) {
+	chrome.storage.local.get(['llmUrl', 'modelId', 'apiKey'],  function (result) {
 		llmUrl = result.llmUrl;
 		modelId = result.modelId;
+		apiKey = result.apiKey;
+		
 	    const sel_text = window.getSelection().toString();
 
 
@@ -67,7 +71,7 @@ document.getElementById('translate-btn').addEventListener('click', () => {
       .then(clipboardText => {
         // 处理剪贴簿内容
         console.log('剪贴簿内容：', clipboardText);
-		sendMsgTranslate(clipboardText, llmUrl, modelId);
+		sendMsgTranslate(clipboardText, llmUrl, modelId, apiKey);
         // ... 其他操作
 		if (isDocumentFocused()) {
 			navigator.clipboard.writeText('');
@@ -75,24 +79,25 @@ document.getElementById('translate-btn').addEventListener('click', () => {
       })
       .catch(err => {
         console.error('读取剪贴簿失败：', err);
-		sendMsgTranslate("", llmUrl, modelId);
+		sendMsgTranslate("", llmUrl, modelId, apiKey);
       });
   } else {
     // 处理选取文字
     console.log('选取文字：', sel_text);
-	sendMsgTranslate(sel_text, llmUrl, modelId);
+	sendMsgTranslate(sel_text, llmUrl, modelId, apiKey);
     // ... 其他操作
   }
 		
 	});	  
 });
 
-function sendMsgSummary(sel_text, llmUrl, modelId) {
+function sendMsgSummary(sel_text, llmUrl, modelId, apiKey) {
 			chrome.runtime.sendMessage( {
 				action: 'summary',
 				data: sel_text,
 				llmUrl: llmUrl,
-				modelId: modelId
+				modelId: modelId,
+				apiKey: apiKey
 			}, () => {
 			// 發送消息後的回調
 			if (chrome.runtime.lastError) {
@@ -104,9 +109,10 @@ function sendMsgSummary(sel_text, llmUrl, modelId) {
 }
 
 document.getElementById('summary-btn').addEventListener('click', () => {
-	chrome.storage.local.get(['llmUrl', 'modelId'],  function (result) {
+	chrome.storage.local.get(['llmUrl', 'modelId', 'apiKey'],  function (result) {
 		llmUrl = result.llmUrl;
 		modelId = result.modelId;
+		apiKey = result.apiKey;
 		
 		const sel_text = window.getSelection().toString();		
 			
@@ -116,7 +122,7 @@ document.getElementById('summary-btn').addEventListener('click', () => {
       .then(clipboardText => {
         // 处理剪贴簿内容
         console.log('剪贴簿内容：', clipboardText);
-		sendMsgSummary(clipboardText, llmUrl, modelId)
+		sendMsgSummary(clipboardText, llmUrl, modelId, apiKey);
         // ... 其他操作
 		if (isDocumentFocused()) {
 			navigator.clipboard.writeText('');
@@ -124,12 +130,12 @@ document.getElementById('summary-btn').addEventListener('click', () => {
       })
       .catch(err => {
         console.error('读取剪贴簿失败：', err);
-		sendMsgSummary("", llmUrl, modelId)
+		sendMsgSummary("", llmUrl, modelId, apiKey);
       });
   } else {
     // 处理选取文字
     console.log('选取文字：', sel_text);
-	sendMsgSummary(sel_text, llmUrl, modelId)
+	sendMsgSummary(sel_text, llmUrl, modelId, apiKey);
     // ... 其他操作
   }
 
