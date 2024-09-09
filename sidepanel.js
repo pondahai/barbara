@@ -261,18 +261,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'updatePopup') {
     const { elementId, result, targetLang } = request.data;
   //console.log("request.data: "+ elementId +","+ result +","+ targetLang );
+  console.log('sidepanel: onMessage'+request);
     // 更新 popup 中的內容
     const targetElement = document.getElementById(elementId);
     if (targetElement ) {
 
-      //let existingText = targetElement.innerText || "";
+
       let convertedResult = markdownToHtml(result);
 	  
-      if (targetLang === "en") {
-        //existingText = `<p><strong></strong> ${convertedResult}</p>`;
-		localStorage.setItem('translation', JSON.stringify(convertedResult));
-      } else if (targetLang === "zh") {
-        //existingText = `<p><strong></strong> ${convertedResult}</p>`;
+      if (elementId === "translationResult") {
+
 		localStorage.setItem('translation', JSON.stringify(convertedResult));
       } else if (elementId === "circle"){
 		//targetElement.hidden = convertedResult;
@@ -287,7 +285,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } else if (elementId === "chatResult") {
         //existingText = `<p><strong></strong> ${convertedResult}</p>`;
 		localStorage.setItem('chat', JSON.stringify(convertedResult));
-      } else {
+      } else if (elementId === "summaryResult") {
         //existingText = `<p><strong></strong> ${convertedResult}</p>`;
 		localStorage.setItem('summary', JSON.stringify(convertedResult));
       }
@@ -330,8 +328,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (response && response.injected) {
 		
 				chrome.tabs.sendMessage(tabs[0].id, { action: "checkWindow" }, function(response) {
+					console.log('checkWindow response');
 					if (response && response.exists) {
 						chrome.tabs.sendMessage(tabs[0].id, { action: "getData" }, function(response) {
+							console.log('getData response');
 							if (response) {
 								document.getElementById('translationResult').innerHTML = (response.translation);
 								localStorage.setItem('translation', JSON.stringify(response.translation));

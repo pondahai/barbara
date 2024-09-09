@@ -46,9 +46,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 			//
             chrome.sidePanel.open({ windowId: tab.windowId });
 
-	langCode = "translate to en_US, please:";  
-	promptText = format_prompt(""+ langCode + " " + info.selectionText)
-	llamaProcess(promptText, tab.id, "translationResult");
+			langCode = "translate to en_US, please:";  
+			promptText = format_prompt(""+ langCode + " " + info.selectionText)
+			llamaProcess(promptText, tab.id, "translationResult", "toEN");
 					// translateSelectedText(info.selectionText, "en", tab.id);
 
 					
@@ -57,10 +57,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             chrome.sidePanel.open({ windowId: tab.windowId });
 
 
-	var current_language = navigator.language || navigator.browserLanguage; //for IE
-	langCode = "translate to "+current_language+ ", please :";  
-	promptText = format_prompt(""+ langCode + " " + info.selectionText)
-	llamaProcess(promptText, tab.id, "translationResult");
+			var current_language = navigator.language || navigator.browserLanguage; //for IE
+			langCode = "translate to "+current_language+ ", please :";  
+			promptText = format_prompt(""+ langCode + " " + info.selectionText)
+			llamaProcess(promptText, tab.id, "translationResult", "toLocal");
 					// translateSelectedText(info.selectionText, "zh", tab.id);
 
 					
@@ -71,7 +71,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 			
 			var current_language = navigator.language.toLowerCase() || navigator.browserLanguage.toLowerCase(); //for IE
 			promptText = format_prompt("將以下文字做總結，以"+current_language+"回答: " + info.selectionText)
-			llamaProcess(promptText, tab.id, "summaryResult");  
+			llamaProcess(promptText, tab.id, "summaryResult", "");  
 					// summarizeSelectedText(info.selectionText, tab.id);
 					
 		  } else if (info.menuItemId === 'openSidePanel') {
@@ -155,7 +155,7 @@ chrome.runtime.onMessage.addListener(async function(request, sender, sendRespons
 	apiKey = request.apiKey;
     chrome.sidePanel.open({ windowId: sender.tab.windowId });
 	
-	llamaProcess(promptText, sender.tab.id, "translationResult");
+	llamaProcess(promptText, sender.tab.id, "translationResult", (request.isEn)?"toLocal":"toEn");
   }
   
   if (request.action === 'summary') {
@@ -166,7 +166,7 @@ chrome.runtime.onMessage.addListener(async function(request, sender, sendRespons
 	modelId = request.modelId;
 	apiKey = request.apiKey;
     chrome.sidePanel.open({ windowId: sender.tab.windowId });
-	llamaProcess(promptText, sender.tab.id, "summaryResult");  
+	llamaProcess(promptText, sender.tab.id, "summaryResult", "");  
   }
   
 // console.log("");
@@ -179,7 +179,7 @@ chrome.runtime.onMessage.addListener(async function(request, sender, sendRespons
 		
 		const promptText = request.data;
 
-		llamaProcess(promptText, (sender.tab)?sender.tab.id:0, "chatResult");    
+		llamaProcess(promptText, (sender.tab)?sender.tab.id:0, "chatResult", "");    
   }
 
   if (request.action === 'getClipboard') {
@@ -261,37 +261,7 @@ async function* readAll(reader, tabId, objElement) {
       }
     }
   }
-			
-			// while (true) {
-				// const {  done, value } = await reader.read();
-				// // done = readerDone;
-				// if (done) break;
-				// // console.log('Received chunk:', decoder.decode(value, { stream: !done }));
-				// const decodedText = decoder.decode(value, { stream: !done });
-				// if (decodedText.startsWith('data: ')) {
-				  // const messages = decodedText.split('\n').filter(line => line.trim().startsWith('data: '));
-				  // for (const message of messages) {
-					// if (message.trim() === 'data: [DONE]') break;
-					
-					// const parsedMessage = JSON.parse(message.trim().substring(6));
-					// const { choices } = parsedMessage;
-					// if (choices && choices.length > 0) {
-					  // const content = choices[0].text || choices[0].delta?.content || '';
-					  // answer += content;
-					  // // displayResult(answer, objElement, '', tabId);
-					  // yield answer;
-					// }
-					// if(parsedMessage.content) {
-					  // answer += parsedMessage.content;
-					  // // displayResult(answer, objElement, '', tabId);
-					  // yield answer;
-					// }
-
-				  // } // for message
-				// } // start with data:
-
-
-			// } // while(!done)		
+				
 		// } else {
 			// console.error('Response error:', response.statusText);
 		// }
@@ -299,7 +269,7 @@ async function* readAll(reader, tabId, objElement) {
 }	
 
 
-async function llamaProcess(promptText, tabId, objElement) {
+async function llamaProcess(promptText, tabId, objElement, targetLang) {
 	  
 		
 	try {
@@ -369,15 +339,15 @@ async function llamaProcess(promptText, tabId, objElement) {
 		  .then(body => {
 			console.log('call readAll');
 			  // 發送消息到 popup.js 轉圈圈
-			  displayResult(false, 'circle', '', tabId);
+			  displayResult(false, 'circle', targetLang, tabId);
 			const reader = body.getReader();
 			// return readAll(reader, tabId, objElement); // 輔助函數，用於讀取所有數據
 			(async ()=> {
 			  for await (const answer of readAll(reader, tabId, objElement)) {
-				  displayResult(answer, objElement, '', tabId);
+				  displayResult(answer, objElement, targetLang, tabId);
 			  }
 			  // 發送消息到 popup.js 關閉圈圈
-			  displayResult(true, 'circle', '', tabId);
+			  displayResult(true, 'circle', targetLang, tabId);
 			
 			})();
 			return "";
@@ -409,18 +379,18 @@ function displayResult(result, elementId, targetLang, tabid) {
     targetLang: targetLang
   };
 
-  // 廣播消息 popup.js 跟 content.js 都會接收
-  chrome.tabs.sendMessage(tabid, {
-    action: 'updatePopup',
-    data: data
-  }, () => {
-    // 發送消息後的回調
-    if (chrome.runtime.lastError) {
-      // console.error('Error sending message to popup:', chrome.runtime.lastError);
-    } else {
-    //  console.log('Message sent to popup');
-    }
-  });
+  // // 廣播消息 popup.js 跟 content.js 都會接收
+  // chrome.tabs.sendMessage(tabid, {
+    // action: 'updatePopup',
+    // data: data
+  // }, () => {
+    // // 發送消息後的回調
+    // if (chrome.runtime.lastError) {
+      // // console.error('Error sending message to popup:', chrome.runtime.lastError);
+    // } else {
+    // //  console.log('Message sent to popup');
+    // }
+  // });
 
   chrome.runtime.sendMessage( {
 	action: 'updatePopup',
@@ -438,59 +408,59 @@ function displayResult(result, elementId, targetLang, tabid) {
 
 
 ///////
-let answer = '';
-function llamaProcess_xxx(promptText, tabId, objElement){
-	const xhr = new XMLHttpRequest();
-    answer = '';
-	// 初始化請求
-	xhr.open('POST', 'http://'+llmUrl+'/v1/chat/completions', true);
-	xhr.setRequestHeader('Content-Type', 'application/json');
-	xhr.setRequestHeader('Authorization', 'Bearer YOUR_OPENAI_API_KEY');
+// let answer = '';
+// function llamaProcess_xxx(promptText, tabId, objElement){
+	// const xhr = new XMLHttpRequest();
+    // answer = '';
+	// // 初始化請求
+	// xhr.open('POST', 'http://'+llmUrl+'/v1/chat/completions', true);
+	// xhr.setRequestHeader('Content-Type', 'application/json');
+	// xhr.setRequestHeader('Authorization', 'Bearer YOUR_OPENAI_API_KEY');
 
-	// 處理流式回應
-	xhr.onprogress = function () {
-		// 將目前收到的回應片段處理
-		if (xhr.readyState === 3) {
-			const responseText = xhr.responseText;
-			// 分段處理收到的資料
-			processStreamData(responseText, tabId, objElement);
-		}
-	};
+	// // 處理流式回應
+	// xhr.onprogress = function () {
+		// // 將目前收到的回應片段處理
+		// if (xhr.readyState === 3) {
+			// const responseText = xhr.responseText;
+			// // 分段處理收到的資料
+			// processStreamData(responseText, tabId, objElement);
+		// }
+	// };
 
-	// 處理完成的請求
-	xhr.onload = function () {
-		if (xhr.status === 200) {
-			console.log('Request completed successfully');
-			const response = xhr.responseText;
-			// 處理最終完整的回應
-			handleCompleteResponse(response, tabId, objElement);
-		} else {
-			console.error('Error: ', xhr.statusText);
-		}
-	};
+	// // 處理完成的請求
+	// xhr.onload = function () {
+		// if (xhr.status === 200) {
+			// console.log('Request completed successfully');
+			// const response = xhr.responseText;
+			// // 處理最終完整的回應
+			// handleCompleteResponse(response, tabId, objElement);
+		// } else {
+			// console.error('Error: ', xhr.statusText);
+		// }
+	// };
 
-	// 發送請求
-	const data = {
-		model: 'gpt-3.5-turbo',
-		messages: promptText,
-		stream: true // 啟用流式回應
-	};
-	xhr.send(JSON.stringify(data));
-}
-// 處理流式回應的函數
-function processStreamData(data, tabId, objElement) {
-    console.log('Streaming data:', data);
-    // 可在此處做即時處理，像是更新 UI 或追加訊息
-	answer += data;
-	displayResult(answer, objElement, '', tabId);
-}
+	// // 發送請求
+	// const data = {
+		// model: 'gpt-3.5-turbo',
+		// messages: promptText,
+		// stream: true // 啟用流式回應
+	// };
+	// xhr.send(JSON.stringify(data));
+// }
+// // 處理流式回應的函數
+// function processStreamData(data, tabId, objElement) {
+    // console.log('Streaming data:', data);
+    // // 可在此處做即時處理，像是更新 UI 或追加訊息
+	// answer += data;
+	// displayResult(answer, objElement, '', tabId);
+// }
 
-// 處理完整回應的函數
-function handleCompleteResponse(response, tabId, objElement) {
-    console.log('Final response:', response);
-	answer += data;
-	displayResult(answer, objElement, '', tabId);
-}
+// // 處理完整回應的函數
+// function handleCompleteResponse(response, tabId, objElement) {
+    // console.log('Final response:', response);
+	// answer += data;
+	// displayResult(answer, objElement, '', tabId);
+// }
 
 //////
 
