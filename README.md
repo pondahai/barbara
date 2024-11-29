@@ -1,7 +1,8 @@
 # barbara
 Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要和聊天功能。
 
-![image](https://github.com/user-attachments/assets/344f8000-9457-4ce9-bc59-329ac6e310f5)
+![image](https://github.com/user-attachments/assets/ecc21d90-3ae7-43b8-9f3a-5ee896bdc96c)
+
 
 Barbara 是一款強大且直觀的 Chrome 擴充功能，專為提升網頁瀏覽體驗而設計。利用本地運行的輕量級語言模型（如 LMStudio 或 llama.cpp），Barbara 為使用者提供高效且準確的雙語翻譯、文章摘要，以及互動式聊天功能，讓日常工作更加輕鬆。
 
