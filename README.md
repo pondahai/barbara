@@ -1,5 +1,8 @@
 # barbara
-Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要和聊天功能。
+Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要和聊天功能。  
+  
+chrome外掛安裝:  
+https://chromewebstore.google.com/detail/barbara-local-ai-assistan/ccpdgcdldfgcdnfgigmnlimbnojamghi  
 
 ![image](https://github.com/user-attachments/assets/ecc21d90-3ae7-43b8-9f3a-5ee896bdc96c)
 
