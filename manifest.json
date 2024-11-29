@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Barbara: Local AI Assistant",
-  "version": "1.35",
-  "description": "Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要和聊天功能。",
+  "version": "1.38",
+  "description": "Barbara 是一款 Chrome 擴充工具，依賴LLM API雙語翻譯、文章摘要和聊天功能。",
   "options_ui": {
     "page": "settings.html",
     "open_in_tab": false
@@ -11,10 +11,14 @@
     "storage",
     "activeTab",
     "contextMenus",
-	"sidePanel"
+    "sidePanel",
+    "clipboardRead"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "side_panel": {
-	"default_path": "sidepanel.html"
+    "default_path": "sidepanel.html"
   },
   "background": {
     "service_worker": "background.js"
@@ -31,14 +35,13 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["marked.min.js", "content.js"],
-      "css": ["styles.css"]
+      "js": ["marked.min.js", "content.js"]
     }
   ],
   "web_accessible_resources": [
     {
-		"resources": [ "icon.png", "lang.gif", "summary.gif" ],
-		"matches": ["<all_urls>"]
+      "resources": [ "icon.png", "lang.gif", "summary.gif" ],
+      "matches": ["<all_urls>"]
     }
   ]
 }

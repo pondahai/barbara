@@ -1,46 +1,102 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Barbara Sidepanel</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 10px;
-      width: 300px;
-    }
-    h2 {
-      margin-bottom: 10px;
-    }
-    #translationResult, #summaryResult {
-      margin-bottom: 10px;
-    }
-  </style>
-<style>
-.loader {
-  border: 16px solid #f3f3f3;
-  border-radius: 50%;
-  border-top: 16px solid #3498db;
-  width: 20px;
-  height: 20px;
-  -webkit-animation: spin 2s linear infinite; /* Safari */
-  animation: spin 2s linear infinite;
-}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barbara2: Local AI Assistant - Side Panel</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background: linear-gradient(to right, #7BC6CC, #BE93C5); /* 渐變背景色 */
+            color: white; /* 文字顏色設為白色 */
+        }
+        label { display: block; margin-top: 10px; }
+        select { 
+            margin-top: 5px; 
+            padding: 5px; 
+            width: 100%; 
+            max-width: 300px; 
+            border-radius: 5px; /* 圓弧角 */
+            background-color: #fff; /* 白色背景 */
+            color: #000; /* 黑色文字 */
+        }
+        .conversation-list { 
+            margin-top: 20px; 
+            border-radius: 5px; /* 圓弧角 */
+            background-color: rgba(255, 255, 255, 0.8); /* 半透明白色背景 */
+            color: black; /* 對話紀錄框內的文字改成黑色 */
+        }
+        .conversation-item { 
+            margin-bottom: 10px; 
+            padding: 10px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; /* 圓弧角 */
+        }
+        .conversation-item:nth-child(even) { background-color: rgba(255, 255, 255, 0.6); /* 半透明白色背景 */}
+        .conversation-item button { 
+            background: none; 
+            border: none; 
+            color: red; 
+            cursor: pointer; 
+            float: right; 
+            border-radius: 5px; /* 圓弧角 */
+        }
 
-/* Safari */
-@-webkit-keyframes spin {
-  0% { -webkit-transform: rotate(0deg); }
-  100% { -webkit-transform: rotate(360deg); }
-}
+        .input-container { 
+            display: flex; 
+            align-items: flex-start; /* 對齊方式：頂部對齊 */
+            gap: 10px; /* 水平間距 */
+        }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-</style>
-  <style>
- code {
+        textarea { 
+            flex: 1; /* 填滿剩餘空間 */
+            height: 100px; 
+            min-height: 100px; 
+            max-height: 200px; 
+            resize: vertical; 
+            padding: 10px; 
+            font-size: 14px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
+            box-sizing: border-box; /* 包括 padding */
+            background-color: #fff; 
+            color: #000; 
+        }
+
+        .button-container { 
+            display: flex; 
+            flex-direction: column; /* 按鈕垂直排列 */
+            gap: 10px; /* 按鈕之間的間距 */
+            margin-left: 10px; /* 與文字區域的間距 */
+        }
+
+        .button-container button { 
+            padding: 5px 10px; /* 按鈕比文字稍寬 */
+            font-size: 14px; 
+            white-space: nowrap; /* 防止文字換行 */
+            cursor: pointer; 
+            border-radius: 5px; 
+            border: none; 
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); 
+        }
+
+        .button-container .send-button {
+            background-color: red; 
+            color: white;
+        }
+
+        .button-container #summaryButton, 
+        .button-container #translateButton {
+            background-color: #2E8B57; 
+            color: white;
+        }
+        .hint { 
+            color: gray; 
+            font-size: 0.9em; 
+            margin-top: 5px; 
+        }
+        code {
             background-color: black;
             color: white;
             font-family: 'Courier New', Courier, monospace;
@@ -50,11 +106,32 @@
             white-space: pre-wrap; /* 保持空格和換行 */
             overflow-x: auto; /* 允許水平滾動 */
         }
-  </style>
+    </style>
 </head>
 <body>
+    <h1>Barbara2</h1>
+    <label for="configSelect">選擇設定:</label>
+    <select id="configSelect">
+        <!-- Options will be populated here -->
+    </select>
 
-  <script type="module" src="sidepanel.js"></script>
-  
+    <div class="conversation-list" id="conversationList">
+        <!-- Conversations will be displayed here -->
+    </div>
+
+    <div class="input-container">
+        <div>
+            <textarea id="userInput" placeholder="輸入您的對話..."></textarea>
+            <div class="hint">按下 CTRL-ENTER 也可以送出</div>
+        </div>
+        <div class="button-container">
+            <button class="send-button" id="sendMessageButton">送出</button>
+            <button id="summaryButton">剪貼簿摘要</button>
+            <button id="translateButton">剪貼簿翻譯</button>
+        </div>
+    </div>
+
+    <script src="marked.min.js"></script>
+    <script src="sidepanel.js"></script>
 </body>
 </html>

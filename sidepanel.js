@@ -1,443 +1,335 @@
-console.log("Popup.js script loaded");
-import './marked.min.js';
-let llmUrl = '';
-let modelId = '';
-let apiKey = '';
-
-      // 作為確認
-      const existingPopup = document.getElementById('popup');
-
-      const popup = document.getElementById('popup') || document.createElement('div');
-      // 確保只有一個小視窗存在
-      //const existingPopup = document.getElementById('popup');
-      //if (existingPopup) {
-      //  popup = existingPopup;
-       // document.body.removeChild(existingPopup);
-      //} else {
-      //  popup = document.createElement('div');
-      //}
-console.log("小視窗");
-
-
-      if(existingPopup == null) {
-
-      // 創建小視窗
-      const popup = document.createElement('div');
-      popup.id = 'popup';
-
-	  popup.classList.add('popup'); // 使用CSS樣式類別
-      //popup.style.border = '1px solid #ccc';
-      //popup.style.background = '#fff';
-      //popup.style.padding = '10px';
-      //popup.style.zIndex = 1000;
-	  //popup.style.maxWidth  = '50vw';
-	//	const h2Element = popup.querySelector('h2');
-	//	if (h2Element) {
-	//	  h2Element.style.fontSize = '20px'; // 設定文字大小為20px
-	//	}
-
-      // 可以在這裡插入小視窗的內容
-      popup.innerHTML = `
-
-
-  <style>
-  body{
-	  padding: 0px;
-	  width: 90%;
-  }
-    .popup {
-
-	  font-size: 12px;
-      line-height: 1.2; /* 調整行距，數值越小行距越緊密 */
-      border-radius: 12px;
-      background-color: rgba(255, 255, 255, 0.8); /* 半透明背景 */
-      backdrop-filter: blur(10px); /* 背景模糊效果 */
-	  
-      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
-      padding: 20px;
-      width: 100%;
-      z-index: 1000;
-    }
-
-/* 只影響 .popup 類別內的元素 */
-.popup h2 {
-  color: #007bff;
-  font-size: 12px;
-  margin: 0;
-  padding-bottom: 10px;
-  border-bottom: 2px solid #007bff;
-  font-weight: bold;
-}
-
-.popup #translationResult, .popup #summaryResult, .popup #chatResult {
-  background-color: #e9f5ff;
-  border: 1px solid #cce5ff;
-  border-radius: 8px;
-  padding: 15px;
-  margin-bottom: 20px;
-}
-
-.popup textarea {
-  width: 100%;
-  height: 120px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 15px;
-  box-sizing: border-box;
-  font-size: 12px;
-}
-
-.popup button {
-  background-color: #28a745;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 12px 20px;
-  cursor: pointer;
-  font-size: 12px;
-  margin-right: 10px;
-  transition: background-color 0.3s ease, transform 0.2s ease;
-}
-
-.popup button:hover {
-  background-color: #218838;
-  transform: scale(1.05);
-}
-
-.popup #clearBtn {
-  background-color: #dc3545;
-}
-
-.popup #clearBtn:hover {
-  background-color: #c82333;
-}
-
-
-
-        * {
-            margin: 0;
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('configSelect').addEventListener('change', handleConfigChange);
+    document.getElementById('sendMessageButton').addEventListener('click', sendMessage);
+    document.getElementById('summaryButton').addEventListener('click', summarizeText);
+    document.getElementById('translateButton').addEventListener('click', translateText);
+    document.getElementById('userInput').addEventListener('keydown', (event) => {
+        if (event.ctrlKey && event.key === 'Enter') {
+            sendMessage();
         }
-        .popup  {
-            background: linear-gradient(to right, #7BC6CC, #BE93C5);
+    });
+    loadConfigs();
+
+    // Listen for messages from content script to reload conversations
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.action === "reloadConversations") {
+            loadSelectedConfig();
+        } else if (request.action === "summarizeFromContent") {
+            summarizeTextFromContent(request.text);
+        } else if (request.action === "translateFromContent") {
+            translateTextFromContent(request.text);
         }
-        .popup h1 {
-            color: white;
-            font-family: 'Oswald', sans-serif;
-            padding-right: 1em;
-        }
-        .popup h1 div {
-            display: inline-block;
-            text-shadow: 2px 2px 3px #3D6366;
-        }
-        .animate div {
-            animation-duration: 3s;
-            animation-iteration-count: infinite;
-            animation-timing-function: ease-in-out;
-        }
-        @keyframes example-1 { 0% { transform: translateY(0); } 50% { transform: translateY(9px); opacity: 0.0625; } }
-        @keyframes example-2 { 0% { transform: translateY(0); } 50% { transform: translateY(10px); opacity: 0.125; } }
-        @keyframes example-3 { 0% { transform: translateY(0); } 50% { transform: translateY(11px); opacity: 0.1875; } }
-        @keyframes example-4 { 0% { transform: translateY(0); } 50% { transform: translateY(12px); opacity: 0.25; } }
-        @keyframes example-5 { 0% { transform: translateY(0); } 50% { transform: translateY(13px); opacity: 0.3125; } }
-        @keyframes example-6 { 0% { transform: translateY(0); } 50% { transform: translateY(14px); opacity: 0.375; } }
-        @keyframes example-7 { 0% { transform: translateY(0); } 50% { transform: translateY(15px); opacity: 0.4375; } }
-        @keyframes example-8 { 0% { transform: translateY(0); } 50% { transform: translateY(16px); opacity: 0.5; } }
-        @keyframes example-9 { 0% { transform: translateY(0); } 50% { transform: translateY(17px); opacity: 0.5625; } }
-        @keyframes example-10 { 0% { transform: translateY(0); } 50% { transform: translateY(18px); opacity: 0.625; } }
-        @keyframes example-11 { 0% { transform: translateY(0); } 50% { transform: translateY(19px); opacity: 0.6875; } }
-        .animate div:nth-child(1) { animation-name: example-1; animation-delay: 0.2s; }
-        .animate div:nth-child(2) { animation-name: example-2; animation-delay: 0.4s; }
-        .animate div:nth-child(3) { animation-name: example-3; animation-delay: 0.6s; }
-        .animate div:nth-child(4) { animation-name: example-4; animation-delay: 0.8s; }
-        .animate div:nth-child(5) { animation-name: example-5; animation-delay: 1s; }
-        .animate div:nth-child(6) { animation-name: example-6; animation-delay: 1.2s; }
-        .animate div:nth-child(7) { animation-name: example-7; animation-delay: 1.4s; }
-        .animate div:nth-child(8) { animation-name: example-8; animation-delay: 1.6s; }
-        .animate div:nth-child(9) { animation-name: example-9; animation-delay: 1.8s; }
-        .animate div:nth-child(10) { animation-name: example-10; animation-delay: 2s; }
-        .animate div:nth-child(11) { animation-name: example-11; animation-delay: 2.2s; }
-        .popup button {
-            margin-top: 20px;
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
-        }
-
-  </style>
-
-    <table>
-	  <tr> 
-	    <td rowspan="2">
-          <h1 id="animatedText"><div>B</div><div>a</div><div>r</div><div>b</div><div>a</div><div>r</div><div>a</div></h1>
-        </td>
-		<td>
-		  🌐<div id="serverUrl"></div>
-		</td>
-	  </tr>
-	  <tr>
-	   <td>
-	      🧠<div id="modelId"></div>
-	   </td>
-	  </tr>
-	</table>
-	<div class="loader" id="circle" hidden></div>
-    <h2>Translation</h2>
-    <div class="aiTextBox" id="translationResult"></div>
-
-    <h2>Summary</h2>
-    <div class="aiTextBox" id="summaryResult"></div>
-
-    <h2>Chat</h2>
-	<div class="aiTextBox" id="oldChatResult"></div>
-    <div class="aiTextBox" id="chatResult"></div>
-
-    <textarea id="humanText"></textarea><br>
-    <button id="chatBtn">聊天</button>
-    <button id="clearBtn">清除</button>
-
-<script>
-</script>
-
-      `;
-
-
-      // 插入小視窗到頁面中
-      document.body.appendChild(popup);
-
-	  
-	  } // popup not exist
-
-      document.getElementById('clearBtn').addEventListener('click', () => {
-		localStorage.setItem('translation', JSON.stringify(""));
-		localStorage.setItem('summary', JSON.stringify(""));
-	    localStorage.setItem('oldchat', JSON.stringify(""));
-		localStorage.setItem('chat', JSON.stringify(""));
-		document.getElementById("translationResult").innerText = "";
-		document.getElementById("summaryResult").innerText = "";
-		document.getElementById("oldChatResult").innerText = "";
-		document.getElementById("chatResult").innerText = "";
-		  
-	  });
-	  //
-      document.getElementById('chatBtn').addEventListener('click', () => {
-        processChat();
-      });
-
-      // 捕捉文字框按下Enter
-      document.getElementById('humanText').addEventListener('keypress', async (message, sender) => {
-      //
-        var key = window.event.keyCode;
-
-		// If the user has pressed enter
-		if (key === 13) {
-			if (event.shiftKey) {
-				// If Shift + Enter is pressed, insert a new line
-				var textarea = document.getElementById('humanText');
-				var start = textarea.selectionStart;
-				var end = textarea.selectionEnd;
-				var value = textarea.value;
-
-				textarea.value = value.substring(0, start) + '\n' + value.substring(end);
-				textarea.selectionStart = textarea.selectionEnd = start + 1;
-
-				event.preventDefault();
-			} else {
-				// If only Enter is pressed, process the chat
-				processChat();
-				event.preventDefault();
-			}
-		}
-  
-
-      }); // keypress
-
-    
-
-
-// 設置消息監聽器
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-//console.log(request.action);
-  if (request.action === 'updatePopup') {
-    const { elementId, result, targetLang } = request.data;
-  //console.log("request.data: "+ elementId +","+ result +","+ targetLang );
-  console.log('sidepanel: onMessage'+request);
-    // 更新 popup 中的內容
-    const targetElement = document.getElementById(elementId);
-    if (targetElement ) {
-
-
-      let convertedResult = markdownToHtml(result);
-	  
-      if (elementId === "translationResult") {
-
-		localStorage.setItem('translation', JSON.stringify(convertedResult));
-      } else if (elementId === "circle"){
-		//targetElement.hidden = convertedResult;
-		if (result == false){
-            const text = document.getElementById('animatedText');
-            text.classList.add('animate');
-		}else{
-            const text = document.getElementById('animatedText');
-            text.classList.remove('animate');
-		}
-		localStorage.setItem('circle', JSON.stringify(convertedResult));
-      } else if (elementId === "chatResult") {
-        //existingText = `<p><strong></strong> ${convertedResult}</p>`;
-		localStorage.setItem('chat', JSON.stringify(convertedResult));
-      } else if (elementId === "summaryResult") {
-        //existingText = `<p><strong></strong> ${convertedResult}</p>`;
-		localStorage.setItem('summary', JSON.stringify(convertedResult));
-      }
-
-      // targetElement.innerHTML = existingText;
-	  // targetElement.innerHTML = `<p></p>`;
-	  targetElement.innerHTML = (`${convertedResult}`);
-    }
-	
-  } 
-
+    });
 });
 
-//import { marked } from './marked.esm.js';
+let selectedConfigIndex = 0;
+let selectedConfig = null;
+let currentConversationItem = null;
+let accumulatedResponse = '';
 
-function  markdownToHtml(markdown) {
-    if (markdown == null || typeof markdown !== 'string') {
-        return ''; // 或者返回一个默认值
-    }
-	// console.log(markdown);
-    let htmlString = marked.parse(markdown);
-	htmlString = htmlString.replace(/<\/p>/g, "</p><br>");
-    return htmlString;		
+function loadConfigs() {
+    chrome.storage.local.get({ configs: [] }, (result) => {
+        const configSelect = document.getElementById('configSelect');
+        configSelect.innerHTML = '';
+        result.configs.forEach((config, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = `${config.apiUrl} - ${config.modelId}`;
+            configSelect.appendChild(option);
+        });
+        if (configSelect.options.length > 0) {
+            chrome.storage.local.get({ selectedConfigIndex: 0 }, (result) => {
+                configSelect.selectedIndex = result.selectedConfigIndex;
+                loadSelectedConfig();
+            });
+        }
+    });
 }
-	  
-document.addEventListener('DOMContentLoaded', function() {
-	chrome.storage.local.get(['llmUrl', 'modelId', 'apiKey'],  function (result) {
-		llmUrl = result.llmUrl;
-		modelId = result.modelId;
-		apiKey = result.apiKey;
-		var modelNamePos = modelId.lastIndexOf('\\');
-		document.getElementById("serverUrl").innerText = llmUrl;
-		document.getElementById("modelId").innerText = (modelNamePos != -1)?modelId.substring(modelNamePos + 1):modelId;
-	});		
-	
-    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-        // 向 background.js 發送訊息，確認 content script 是否已注入
-        chrome.runtime.sendMessage({ action: "checkContentScript", tabId: tabs[0].id }, function(response) {
-			console.log(response);			
-            if (response && response.injected) {
-		
-				chrome.tabs.sendMessage(tabs[0].id, { action: "checkWindow" }, function(response) {
-					console.log('checkWindow response');
-					if (response && response.exists) {
-						chrome.tabs.sendMessage(tabs[0].id, { action: "getData" }, function(response) {
-							console.log('getData response');
-							if (response) {
-								document.getElementById('translationResult').innerHTML = (response.translation);
-								localStorage.setItem('translation', JSON.stringify(response.translation));
-								document.getElementById('summaryResult').innerHTML = (response.summary);
-								localStorage.setItem('summary', JSON.stringify(response.summary));
-								document.getElementById('oldChatResult').innerHTML = (response.oldChat);
-								localStorage.setItem('oldchat', JSON.stringify(response.oldChat));
-								document.getElementById('chatResult').innerHTML = (response.chat);
-								localStorage.setItem('chat', JSON.stringify(response.chat));
-							}
-						});
-					} else {
-						// webpage's popup is not existingPopup
-						// 
-						document.getElementById("translationResult").innerHTML = (JSON.parse(localStorage.getItem('translation')));
-						document.getElementById("summaryResult").innerHTML = (JSON.parse(localStorage.getItem('summary')));
-						document.getElementById("oldChatResult").innerHTML = (JSON.parse(localStorage.getItem('oldchat')));
-						document.getElementById("chatResult").innerHTML = (JSON.parse(localStorage.getItem('chat')));
-						// document.getElementById("circle").hidden = JSON.parse(localStorage.getItem('circle'));
-						document.getElementById("humanText").innerText = JSON.parse(localStorage.getItem('humanText'));
-						
-					}
-				});
+
+function handleConfigChange(event) {
+    const selectedIndex = parseInt(event.target.value, 10);
+    chrome.storage.local.set({ selectedConfigIndex: selectedIndex }, () => {
+        loadSelectedConfig();
+    });
+}
+
+function loadSelectedConfig() {
+    const configSelect = document.getElementById('configSelect');
+    const selectedIndex = configSelect.selectedIndex;
+    if (selectedIndex === -1) return;
+    selectedConfigIndex = selectedIndex;
+    chrome.storage.local.get({ configs: [] }, (result) => {
+        selectedConfig = result.configs[selectedIndex];
+        loadConversations(selectedConfig);
+    });
+}
+
+function loadConversations(config) {
+    if (!config) return;
+    const conversationKey = `${config.apiUrl}-${config.modelId}`;
+    chrome.storage.local.get({ conversations: {} }, (result) => {
+        const conversations = result.conversations[conversationKey] || [];
+        const conversationList = document.getElementById('conversationList');
+        conversationList.innerHTML = '';
+        conversations.forEach((conversation, index) => {
+            const div = document.createElement('div');
+            div.className = 'conversation-item';
+            div.innerHTML = marked.parse(conversation.content);
+
+            const deleteButton = document.createElement('button');
+            deleteButton.textContent = 'X';
+            deleteButton.onclick = () => confirmDeleteConversation(conversationKey, index);
+            div.appendChild(deleteButton);
+
+            conversationList.appendChild(div);
+        });
+    });
+}
+
+async function sendMessage() {
+    const userInput = document.getElementById('userInput').value.trim();
+    if (!userInput) return;
+    if (!selectedConfig) {
+        alert("請先設定 API 網址和 API 金鑰");
+        return;
+    }
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    const conversations = await getConversations(conversationKey);
+    const messages = conversations.map(conv => ({ role: conv.role, content: conv.content }));
+    messages.push({ role: 'user', content: userInput });
+    await addConversation(conversationKey, { role: 'user', content: userInput });
+    updateConversationItem({ role: 'user', content: userInput });
+    try {
+        await sendRequestToAPI(selectedConfig, messages);
+    } catch (error) {
+        console.error('Error sending message:', error);
+    }
+    document.getElementById('userInput').value = ''; // Clear input field
+}
+
+function getConversations(key) {
+    return new Promise((resolve) => {
+        chrome.storage.local.get({ conversations: {} }, (result) => {
+            resolve(result.conversations[key] || []);
+        });
+    });
+}
+
+function setConversations(key, conversations) {
+    return new Promise((resolve, reject) => {
+        chrome.storage.local.get({ conversations: {} }, (result) => {
+            result.conversations[key] = conversations;
+            chrome.storage.local.set({ conversations: result.conversations }, (result) => {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                } else {
+                    resolve();
+                }
+            });
+        });
+    });
+}
+
+async function addConversation(key, message) {
+    const conversations = await getConversations(key);
+    conversations.push({ role: message.role, content: message.content });
+    await setConversations(key, conversations);
+}
+
+function updateConversationItem(message) {
+    const conversationList = document.getElementById('conversationList');
+    const div = document.createElement('div');
+    div.className = 'conversation-item';
+    div.innerHTML = marked.parse(message.content);
+
+    const deleteButton = document.createElement('button');
+    deleteButton.textContent = 'X';
+    deleteButton.onclick = () => confirmDeleteConversation(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`, getConversationIndex(message));
+    div.appendChild(deleteButton);
+
+    conversationList.appendChild(div);
+}
+
+function getConversationIndex(message) {
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    return new Promise((resolve, reject) => {
+        chrome.storage.local.get({ conversations: {} }, (result) => {
+            const conversations = result.conversations[conversationKey] || [];
+            const index = conversations.findIndex(conv => conv.content === message.content);
+            if (index === -1) {
+                reject(new Error('Conversation not found'));
             } else {
-                // 這裡可以處理 content script 不存在的情況
-                console.log('Content script not injected');
-						// webpage's popup is not existingPopup
-						// 
-						document.getElementById("translationResult").innerHTML = (JSON.parse(localStorage.getItem('translation')));
-						document.getElementById("summaryResult").innerHTML = (JSON.parse(localStorage.getItem('summary')));
-						document.getElementById("oldChatResult").innerHTML = (JSON.parse(localStorage.getItem('oldchat')));
-						document.getElementById("chatResult").innerHTML = (JSON.parse(localStorage.getItem('chat')));
-						// document.getElementById("circle").hidden = JSON.parse(localStorage.getItem('circle'));
-						document.getElementById("humanText").innerText = JSON.parse(localStorage.getItem('humanText'));
+                resolve(index);
             }
-		});
-	});
-});
+        });
+    });
+}
 
+function deleteConversation(key, index) {
+    getConversations(key).then(async (conversations) => {
+        conversations.splice(index, 1);
+        await setConversations(key, conversations);
+        loadSelectedConfig();
+    }).catch(error => {
+        console.error('Error deleting conversation:', error);
+    });
+}
 
-  
+function confirmDeleteConversation(key, index) {
+    if (confirm('確定要刪除這則對話嗎？')) {
+        deleteConversation(key, index);
+    }
+}
 
+async function summarizeTextFromContent(text) {
+    if (!text) {
+        alert("無資料");
+        return;
+    }
+    if (!selectedConfig) {
+        alert("請先設定 API 網址和 API 金鑰");
+        return;
+    }
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    const message = `請為以下文字提供摘要:\n${text}`;
+    await addConversation(conversationKey, { role: 'user', content: message });
+    updateConversationItem({ role: 'user', content: message });
+    try {
+        await sendRequestToAPI(selectedConfig, [{ role: 'user', content: message }]);
+    } catch (error) {
+        console.error('Error summarizing text:', error);
+    }
+}
 
-// popup.js
+async function translateTextFromContent(text) {
+    if (!text) {
+        alert("無資料");
+        return;
+    }
+    if (!selectedConfig) {
+        alert("請先設定 API 網址和 API 金鑰");
+        return;
+    }
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    const englishRatio = calculateEnglishRatio(text);
+    const targetLanguage = englishRatio > 0.5 ? navigator.language : 'en_US';
+    const message = `請將以下文字翻譯成 ${targetLanguage}:\n${text}`;
+    await addConversation(conversationKey, { role: 'user', content: message });
+    updateConversationItem({ role: 'user', content: message });
+    try {
+        await sendRequestToAPI(selectedConfig, [{ role: 'user', content: message }]);
+    } catch (error) {
+        console.error('Error translating text:', error);
+    }
+}
 
+async function summarizeText() {
+    const text = await getTextFromSelectionOrClipboard();
+    if (!text) {
+        alert("無資料");
+        return;
+    }
+    await summarizeTextFromContent(text);
+}
 
+async function translateText() {
+    const text = await getTextFromSelectionOrClipboard();
+    if (!text) {
+        alert("無資料");
+        return;
+    }
+    await translateTextFromContent(text);
+}
 
+async function getTextFromSelectionOrClipboard() {
+    let text = '';
+    try {
+        text = window.getSelection().toString().trim();
+        if (!text) {
+            text = await navigator.clipboard.readText().then(clipText => clipText.trim()).catch(() => '');
+        }
+    } catch (error) {
+        console.error('無法讀取選取文字或剪貼簿:', error);
+    }
+    return text;
+}
 
-// 通知background.js處理對話
-  function processChat() {
-	  var current_language = navigator.language.toLowerCase() || navigator.browserLanguage.toLowerCase(); //for IE
-      const humanText = document.getElementById("humanText").value + "，以"+current_language+"回答"+"\n";
-       
-	  const translationText = document.getElementById("translationResult").innerText + " ";
-  	  const summaryText = document.getElementById("summaryResult").innerText + " ";
-	  const chatText = document.getElementById("chatResult").innerText + " ";
-	  
-	  document.getElementById("oldChatResult").innerHTML = document.getElementById("chatResult").innerHTML + "\n\n" + humanText;
-	  localStorage.setItem('oldchat', JSON.stringify(document.getElementById("oldChatResult").innerHTML));
-	  //console.log(translationText, summaryText, chatText);
-          const context = translationText + summaryText;
-		  document.getElementById("chatResult").innerText = "";
-          document.getElementById("humanText").value = "";
+function calculateEnglishRatio(text) {
+    const englishCharRegex = /[a-zA-Z]/g;
+    const matches = text.match(englishCharRegex);
+    if (!matches) return 0;
+    return matches.length / text.length;
+}
 
-const chat = [
-    {
-        role : 'assistant',
-        content : context + chatText
-    },
-    {
-        role: 'user',
-		content : humanText
-        
-    },
-];
-          // promptText = "### Assistant: " + context + chatText + "\n### Human: " + humanText + "\n### Assistant:";
+async function sendRequestToAPI(config, messages) {
+    const response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify({
+            model: config.modelId,
+            messages: messages,
+            stream: true
+        })
+    });
 
-		// const llmUrl = localStorage.getItem('llmUrl');
-		// const modelId = localStorage.getItem('modelId');
-			console.log(chat);
+    if (!response.ok) {
+        throw new Error('API request failed: ' + response.statusText);
+    }
 
-			  chrome.runtime.sendMessage( {
-				action: 'chat',
-				data: chat,
-				llmUrl: llmUrl,
-				modelId: modelId,
-				apiKey: apiKey
-			  }, () => {
-				// 發送消息後的回調
-				if (chrome.runtime.lastError) {
-				//  console.error('Error sending message to popup:', chrome.runtime.lastError);
-				} else {
-				//  console.log('Message sent to popup');
-				}
-			  });		
-  }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    const conversationKey = `${config.apiUrl}-${selectedConfig.modelId}`;
+    accumulatedResponse = '';
 
+    currentConversationItem = document.createElement('div');
+    currentConversationItem.className = 'conversation-item';
 
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'conversation-content';
 
-chrome.runtime.onMessage.addListener(async function(request, sender, sendResponse) {
-	if(request.action === 'getLlmUrl') {
-		console.log('popup.js getLlmUrl');
-		// const llmUrl = localStorage.getItem('llmUrl') | 'localhost';
-		sendResponse({ llmUrl: llmUrl });
-	}
-	return true;
-});
+    const deleteButton = document.createElement('button');
+    deleteButton.textContent = 'X';
+    deleteButton.onclick = () => confirmDeleteConversation(conversationKey, -1);
 
+    currentConversationItem.appendChild(contentDiv);
+    currentConversationItem.appendChild(deleteButton);
 
+    const conversationList = document.getElementById('conversationList');
+    conversationList.appendChild(currentConversationItem);
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        accumulatedResponse += parseAndStreamResponse(chunk);
+        contentDiv.innerHTML = marked.parse(accumulatedResponse);
+    }
+
+    await addConversation(conversationKey, { role: 'assistant', content: accumulatedResponse });
+}
+
+function parseAndStreamResponse(chunk) {
+    const lines = chunk.split('\n').filter(line => line.trim() !== '');
+    let accumulatedContent = '';
+    lines.forEach(line => {
+        if (line.startsWith('data: ')) {
+            const data = line.substring('data: '.length);
+            if (data === '[DONE]') {
+                return;
+            }
+            try {
+                const parsedData = JSON.parse(data);
+                if (parsedData.choices && parsedData.choices[0] && parsedData.choices[0].delta && parsedData.choices[0].delta.content) {
+                    const token = parsedData.choices[0].delta.content;
+                    accumulatedContent += token;
+                }
+            } catch (error) {
+                console.error('Error parsing JSON:', error);
+            }
+        }
+    });
+    return accumulatedContent;
+}
