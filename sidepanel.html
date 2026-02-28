@@ -3,54 +3,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Barbara2: Local AI Assistant - Side Panel</title>
+    <title>Barbara2: Local AI Assistant - Side Panel & Settings</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            background: linear-gradient(to right, #7BC6CC, #BE93C5); /* 渐變背景色 */
-            color: white; /* 文字顏色設為白色 */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow-x: hidden;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            transition: transform 0.5s ease;
+            width: 400vw; /* 四個頁面各佔滿視窗 */
+            position: relative;
+            overflow: auto; /* 添加 overflow 屬性 */
+        }
+        .page {
+            min-height: 100vh;
+            flex: 1;
+            padding: 20px;
+            box-sizing: border-box;
+            position: relative;
+            overflow-x: auto; /* 添加 overflow-x 屬性 */
+        }
+        .settings-page {
+            background-color: #f4f4f4;
+            color: black;
+        }
+        .sidepanel-page {
+            background: linear-gradient(to right, #7BC6CC, #BE93C5);
+            color: white;
         }
         label { display: block; margin-top: 10px; }
-        select { 
+        select, input, button { 
             margin-top: 5px; 
             padding: 5px; 
             width: 100%; 
             max-width: 300px; 
-            border-radius: 5px; /* 圓弧角 */
-            background-color: #fff; /* 白色背景 */
-            color: #000; /* 黑色文字 */
+            border-radius: 5px; 
+            border: 1px solid #ccc; 
+            box-sizing: border-box;
         }
         .conversation-list { 
             margin-top: 20px; 
-            border-radius: 5px; /* 圓弧角 */
-            background-color: rgba(255, 255, 255, 0.8); /* 半透明白色背景 */
-            color: black; /* 對話紀錄框內的文字改成黑色 */
+            margin-bottom: 20px; /* 添加底部外邊距 */
+            border-radius: 5px; 
+            background-color: rgba(255, 255, 255, 0.8); 
+            color: black; 
+            padding: 10px;
+            position: relative;
         }
         .conversation-item { 
             margin-bottom: 10px; 
             padding: 10px; 
             border: 1px solid #ccc; 
-            border-radius: 5px; /* 圓弧角 */
+            border-radius: 5px;
+            position: relative;
         }
-        .conversation-item:nth-child(even) { background-color: rgba(255, 255, 255, 0.6); /* 半透明白色背景 */}
-        .conversation-item button { 
+        .conversation-item:nth-child(even) { background-color: rgba(255, 255, 255, 0.6); }
+        .conversation-item button.delete-button { 
             background: none; 
             border: none; 
             color: red; 
             cursor: pointer; 
-            float: right; 
-            border-radius: 5px; /* 圓弧角 */
+            font-size: 18px;
+            position: absolute;
+            bottom: -10px;
+            right: 10px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            z-index: 1;
         }
-
+        .conversation-item button.copy-button { 
+            background: none; 
+            border: none; 
+            color: #007bff; 
+            cursor: pointer; 
+            font-size: 18px;
+            position: absolute;
+            bottom: -8px;
+            right: 40px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            z-index: 1;
+        }
         .input-container { 
             display: flex; 
-            align-items: flex-start; /* 對齊方式：頂部對齊 */
-            gap: 10px; /* 水平間距 */
+            align-items: flex-start; 
+            gap: 10px; 
         }
-
         textarea { 
-            flex: 1; /* 填滿剩餘空間 */
+            flex: 1; 
             height: 100px; 
             min-height: 100px; 
             max-height: 200px; 
@@ -59,33 +111,29 @@
             font-size: 14px; 
             border: 1px solid #ccc; 
             border-radius: 5px; 
-            box-sizing: border-box; /* 包括 padding */
+            box-sizing: border-box; 
             background-color: #fff; 
             color: #000; 
         }
-
         .button-container { 
             display: flex; 
-            flex-direction: column; /* 按鈕垂直排列 */
-            gap: 10px; /* 按鈕之間的間距 */
-            margin-left: 10px; /* 與文字區域的間距 */
+            flex-direction: column; 
+            gap: 10px; 
+            margin-left: 10px; 
         }
-
         .button-container button { 
-            padding: 5px 10px; /* 按鈕比文字稍寬 */
+            padding: 5px 10px; 
             font-size: 14px; 
-            white-space: nowrap; /* 防止文字換行 */
+            white-space: nowrap; 
             cursor: pointer; 
             border-radius: 5px; 
             border: none; 
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); 
         }
-
         .button-container .send-button {
             background-color: red; 
             color: white;
         }
-
         .button-container #summaryButton, 
         .button-container #translateButton {
             background-color: #2E8B57; 
@@ -103,33 +151,218 @@
             padding: 10px;
             border-radius: 5px;
             display: block;
-            white-space: pre-wrap; /* 保持空格和換行 */
-            overflow-x: auto; /* 允許水平滾動 */
+            white-space: pre-wrap;
+            overflow-x: auto;
+            position: relative;
         }
+        code button.copy-button {
+            background: none;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 18px;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            z-index: 1;
+        }
+        .config-list { margin-top: 20px; }
+        .config-item { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 5px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
+            padding: 5px;
+            position: relative;
+        }
+        .config-item button { 
+            background: none; 
+            border: none; 
+            color: red; 
+            cursor: pointer; 
+            font-size: 18px;
+            position: absolute;
+            top: 10px; /* Move up by one X button height */
+            right: 10px; /* Adjust to avoid overlapping with delete button */
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            z-index: 1;
+        }
+        .nav-button {
+            position: fixed;
+            top: 80px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            z-index: 1000;
+            display: none; /* 預設隱藏 */
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            transform: translateY(-50%);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .prev {
+            left: -40px; /* Move outside the container by one button width */
+            transform: translateY(-50%) translateX(50%);
+        }
+        .next {
+            right: -5px; /* Move outside the container by one button width */
+            transform: translateY(-50%) translateX(-50%);
+        }
+        .prev::before {
+            content: '\25C0'; /* 左箭頭 */
+            font-size: 18px;
+        }
+        .next::before {
+            content: '\25B6'; /* 右箭頭 */
+            font-size: 18px;
+        }
+        .delete-all-conversations {
+            position: relative;
+            margin-bottom: 10px;
+            text-align: right;
+        }
+        .delete-all-conversations button {
+            background: none;
+            border: none;
+            color: red;
+            cursor: pointer;
+            font-size: 18px;
+            position: absolute;
+            top: 5px;
+            right: 0px;
+            z-index: 1; /* Ensure it is above other content */
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+        /* 添加禁用狀態的樣式 */
+        .loading {
+            opacity: 0.6;
+            cursor: not-allowed !important;
+        }
+        
+      /* 修改載入指示器的樣式 */
+      .loading-indicator {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 1000;
+            text-align: center;
+        }
+        
+        .loading-indicator.show {
+            display: block;
+        }
+        
+        .talking-head {
+            font-size: 40px;
+            margin-bottom: 10px;
+        }
+        
+        .dots {
+            display: inline-block;
+        }
+        
+        .dots::after {
+            content: '';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80% { content: '...'; }
+        }        
+        .loading-indicator.show {
+            display: block;
+        }        
     </style>
 </head>
 <body>
-    <h1>Barbara2</h1>
-    <label for="configSelect">選擇設定:</label>
-    <select id="configSelect">
-        <!-- Options will be populated here -->
-    </select>
-
-    <div class="conversation-list" id="conversationList">
-        <!-- Conversations will be displayed here -->
+    <div class="loading-indicator" id="loadingIndicator">
+        <div class="talking-head">🤖</div>
+        <div><span class="dots"></span></div>
     </div>
 
-    <div class="input-container">
-        <div>
-            <textarea id="userInput" placeholder="輸入您的對話..."></textarea>
-            <div class="hint">按下 CTRL-ENTER 也可以送出</div>
+    <div class="container" id="container">
+        <div class="page settings-page">
+            <h1>Barbara2: Local AI Assistant 設定</h1>
+            <label for="apiUrl">API 網址:</label>
+            <input type="text" id="apiUrl" placeholder="https://example.com">
+            <label for="apiKey">API 金鑰:</label>
+            <input type="text" id="apiKey" placeholder="your-api-key">
+            <button id="fetchModelsButton">取得模型列表</button>
+            <label for="modelSelect">選擇模型:</label>
+            <select id="modelSelect"></select>
+            <button id="saveConfigButton">儲存設定</button>
+
+            <div class="config-list">
+                <h2>已儲存的設定:</h2>
+                <div id="configList"></div>
+            </div>
         </div>
-        <div class="button-container">
-            <button class="send-button" id="sendMessageButton">送出</button>
-            <button id="summaryButton">剪貼簿摘要</button>
-            <button id="translateButton">剪貼簿翻譯</button>
+        <div class="page sidepanel-page">
+            <h1>Barbara2</h1>
+            <label for="configSelect">選擇設定:</label>
+            <select id="configSelect">
+                <!-- Options will be populated here -->
+            </select>
+
+            <div class="delete-all-conversations">
+                <button id="deleteAllConversationsButton">X</button>
+            </div>
+
+            <div class="conversation-list" id="conversationList">
+                <!-- Conversations will be displayed here -->
+            </div>
+
+            <div class="input-container">
+                <div>
+                    <textarea id="userInput" placeholder="輸入您的對話..."></textarea>
+                    <div class="hint">按下 CTRL-ENTER 也可以送出</div>
+                </div>
+                <div class="button-container">
+                    <button class="send-button" id="sendMessageButton">送出</button>
+                    <button id="summaryButton">剪貼簿摘要</button>
+                    <button id="translateButton">剪貼簿翻譯</button>
+                </div>
+            </div>
         </div>
+        <div class="page"></div> <!-- 空白頁面 -->
+        <div class="page"></div> <!-- 空白頁面 -->
     </div>
+    <button class="nav-button prev" id="prevButton"></button>
+    <button class="nav-button next" id="nextButton"></button>
 
     <script src="marked.min.js"></script>
     <script src="sidepanel.js"></script>

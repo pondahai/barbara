@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barbara2: Local AI Assistant - Settings</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        label { display: block; margin-top: 10px; }
+        input, select, button { margin-top: 5px; padding: 5px; width: 100%; max-width: 300px; }
+        .config-list { margin-top: 20px; }
+        .config-item { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 5px; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
+            padding: 5px; 
+        }
+        .config-item button { background: none; border: none; color: red; cursor: pointer;  width: 20px; margin-right: 0; float: right;}
+    </style>
+</head>
+<body>
+    <h1>Barbara2: Local AI Assistant 設定</h1>
+    <label for="apiUrl">API 網址:</label>
+    <input type="text" id="apiUrl" placeholder="https://example.com">
+    <label for="apiKey">API 金鑰:</label>
+    <input type="text" id="apiKey" placeholder="your-api-key">
+    <button id="fetchModelsButton">取得模型列表</button>
+    <label for="modelSelect">選擇模型:</label>
+    <select id="modelSelect"></select>
+    <button id="saveConfigButton">儲存設定</button>
+
+    <div class="config-list">
+        <h2>已儲存的設定:</h2>
+        <div id="configList"></div>
+    </div>
+
+    <script src="settings.js"></script>
+</body>
+</html>

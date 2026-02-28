@@ -1,0 +1,659 @@
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('configSelect').addEventListener('change', handleConfigChange);
+    document.getElementById('sendMessageButton').addEventListener('click', sendMessage);
+    document.getElementById('summaryButton').addEventListener('click', summarizeText);
+    document.getElementById('translateButton').addEventListener('click', translateText);
+    document.getElementById('userInput').addEventListener('keydown', (event) => {
+        if (event.ctrlKey && event.key === 'Enter') {
+            sendMessage();
+        }
+    });
+    document.getElementById('fetchModelsButton').addEventListener('click', fetchModels);
+    document.getElementById('saveConfigButton').addEventListener('click', saveConfig);
+    document.getElementById('configList').addEventListener('click', (event) => {
+        if (event.target.tagName === 'DIV') {
+            const index = event.target.dataset.index;
+            chrome.storage.local.get({ configs: [] }, (result) => {
+                const selectedConfig = result.configs[index];
+                document.getElementById('apiUrl').value = selectedConfig.apiUrl;
+                document.getElementById('apiKey').value = selectedConfig.apiKey;
+                document.getElementById('modelSelect').value = selectedConfig.modelId;
+                fetchModels().then(() => {
+                    setSavedModelAsDefault(selectedConfig.modelId);
+                });
+            });
+        }
+    });
+    document.getElementById('prevButton').addEventListener('click', () => changePage(-1));
+    document.getElementById('nextButton').addEventListener('click', () => changePage(1));
+    document.getElementById('deleteAllConversationsButton').addEventListener('click', deleteAllConversations);
+
+    // Listen for messages from content script to reload conversations
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.action === "reloadConversations") {
+            loadSelectedConfig();
+        } else if (request.action === "summarizeFromContent") {
+            summarizeTextFromContent(request.text);
+        } else if (request.action === "translateFromContent") {
+            translateTextFromContent(request.text);
+        }
+    });
+
+    loadConfigs();
+    loadConfigsAndCheckStorage();
+    updateButtons();
+    // 虛擬動作：自動切換到右邊的 sidepanel 頁面
+    changePage(1);
+});
+
+let currentPage = 1; // 預設顯示 settings 頁面
+const totalPages = 2; // 總頁數
+const prevButton = document.getElementById('prevButton');
+const nextButton = document.getElementById('nextButton');
+const deleteAllConversationsButton = document.getElementById('deleteAllConversationsButton');
+
+function updateButtons() {
+    prevButton.style.display = currentPage === 1 ? 'none' : 'block';
+    nextButton.style.display = currentPage === totalPages ? 'none' : 'block';
+}
+
+let scrollTop = document.body.scrollTop;
+let targetScrollTop = 0;
+let duration = 500; // 動畫時間（毫秒）
+let startTime = null;
+
+function animate() {
+	
+  const currentTime = Date.now();
+  if (startTime === null) {
+    startTime = currentTime;
+  }
+  const progress = (currentTime - startTime) / duration;
+  if (progress < 1) {
+    document.body.scrollTop = scrollTop + (targetScrollTop - scrollTop) * progress;
+    requestAnimationFrame(animate);
+  }
+}
+
+function changePage(direction) {
+    const container = document.getElementById('container');
+    currentPage += direction;
+    if (currentPage < 1) currentPage = 1;
+    if (currentPage > totalPages) currentPage = totalPages;
+    container.style.transform = `translateX(-${(currentPage - 1) * 100}vw)`;
+    updateButtons();
+
+    // Scroll to the top of the page when changing to the settings page
+    if (currentPage === 1) {
+		scrollTop = document.body.scrollTop;
+		targetScrollTop = 0;
+		duration = 500; // 動畫時間（毫秒）
+		startTime = null;
+		animate();
+    }
+}
+
+let selectedConfigIndex = 0;
+let selectedConfig = null;
+let currentConversationItem = null;
+let accumulatedResponse = '';
+
+async function loadConfigs() {
+    chrome.storage.local.get({ configs: [] }, (result) => {
+        const configSelect = document.getElementById('configSelect');
+        configSelect.innerHTML = '';
+        result.configs.forEach((config, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = `${config.apiUrl} - ${config.modelId}`;
+            configSelect.appendChild(option);
+        });
+        if (configSelect.options.length > 0) {
+            chrome.storage.local.get({ selectedConfigIndex: 0 }, (result) => {
+                configSelect.selectedIndex = result.selectedConfigIndex;
+                loadSelectedConfig();
+            });
+        }
+        loadConfigList(result.configs);
+    });
+}
+
+function handleConfigChange(event) {
+    const selectedIndex = parseInt(event.target.value, 10);
+    chrome.storage.local.set({ selectedConfigIndex: selectedIndex }, () => {
+        loadSelectedConfig();
+    });
+}
+
+function loadSelectedConfig() {
+    const configSelect = document.getElementById('configSelect');
+    const selectedIndex = configSelect.selectedIndex;
+    if (selectedIndex === -1) return;
+    selectedConfigIndex = selectedIndex;
+    chrome.storage.local.get({ configs: [] }, (result) => {
+        selectedConfig = result.configs[selectedIndex];
+        loadConversations(selectedConfig);
+    });
+}
+
+function loadConversations(config) {
+    if (!config) return;
+    const conversationKey = `${config.apiUrl}-${config.modelId}`;
+    chrome.storage.local.get({ conversations: {} }, (result) => {
+        const conversations = result.conversations[conversationKey] || [];
+        const conversationList = document.getElementById('conversationList');
+        conversationList.innerHTML = '';
+        conversations.forEach((conversation, index) => {
+            const div = document.createElement('div');
+            div.className = 'conversation-item';
+            div.innerHTML = marked.parse(conversation.content);
+
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'delete-button';
+            deleteButton.textContent = 'X';
+            deleteButton.onclick = () => confirmDeleteConversation(conversationKey, index);
+            div.appendChild(deleteButton);
+
+            // Add copy button
+            const copyButton = document.createElement('button');
+            copyButton.className = 'copy-button';
+            copyButton.innerHTML = '&#128203;'; // Copy icon
+            copyButton.onclick = () => copyConversation(conversationKey, index);
+            div.appendChild(copyButton);
+
+            addCopyButtonIfCodeExists(div);
+
+            conversationList.appendChild(div);
+        });
+    });
+}
+
+async function sendMessage() {
+    const userInput = document.getElementById('userInput').value.trim();
+    if (!userInput) return;
+    if (!selectedConfig) {
+        alert("請先設定 API 網址和 API 金鑰");
+        return;
+    }
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    const conversations = await getConversations(conversationKey);
+    const messages = conversations.map(conv => ({ role: conv.role, content: conv.content }));
+    messages.push({ role: 'user', content: userInput });
+    await addConversation(conversationKey, { role: 'user', content: userInput });
+    const deleteIndex = await updateConversationItem({ role: 'user', content: userInput });
+    try {
+        await sendRequestToAPI(selectedConfig, messages, deleteIndex);
+    } catch (error) {
+        console.error('Error sending message:', error);
+    }
+    document.getElementById('userInput').value = ''; // Clear input field
+}
+
+function getConversations(key) {
+    return new Promise((resolve) => {
+        chrome.storage.local.get({ conversations: {} }, (result) => {
+            resolve(result.conversations[key] || []);
+        });
+    });
+}
+
+function setConversations(key, conversations) {
+    return new Promise((resolve, reject) => {
+        chrome.storage.local.get({ conversations: {} }, (result) => {
+            result.conversations[key] = conversations;
+            chrome.storage.local.set({ conversations: result.conversations }, (result) => {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                } else {
+                    resolve();
+                }
+            });
+        });
+    });
+}
+
+async function addConversation(key, message) {
+    const conversations = await getConversations(key);
+    conversations.push({ role: message.role, content: message.content });
+    await setConversations(key, conversations);
+}
+
+async function updateConversationItem(message) {
+    const conversationList = document.getElementById('conversationList');
+    const div = document.createElement('div');
+    div.className = 'conversation-item';
+    div.innerHTML = marked.parse(message.content);
+
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'delete-button';
+    deleteButton.textContent = 'X';
+	const deleteIndex = await getConversationIndex(message);
+    deleteButton.onclick = () => confirmDeleteConversation(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`,  deleteIndex);
+    div.appendChild(deleteButton);
+
+    // Add copy button
+    const copyButton = document.createElement('button');
+    copyButton.className = 'copy-button';
+    copyButton.innerHTML = '&#128203;'; // Copy icon
+    copyButton.onclick = () => copyConversation(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`, deleteIndex);
+    div.appendChild(copyButton);
+
+    addCopyButtonIfCodeExists(div);
+
+    conversationList.appendChild(div);
+	
+	return deleteIndex + 1;
+}
+
+async function getConversationIndex(message) {
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    return new Promise ((resolve, reject) => {
+        chrome.storage.local.get({ conversations: {} }, (result) => {
+            const conversations = result.conversations[conversationKey] || [];
+            const index = conversations.findIndex(conv => conv.content === message.content);
+            if (index === -1) {
+                reject(new Error('Conversation not found'));
+            } else {
+                resolve(index);
+            }
+        });
+    });
+}
+
+function deleteConversation(key, index) {
+    getConversations(key).then(async (conversations) => {
+        conversations.splice(index, 1);
+        await setConversations(key, conversations);
+        loadSelectedConfig();
+    }).catch(error => {
+        console.error('Error deleting conversation:', error);
+    });
+}
+
+async function confirmDeleteConversation(key, index) {
+    if (confirm('確定要刪除這則對話嗎？')) {
+        deleteConversation(key, index);
+    }
+}
+
+async function copyConversation(key, index) {
+    const conversation = await getConversations(key);
+    const conversationItem = conversation[index];
+    navigator.clipboard.writeText(conversationItem.content);
+}
+
+async function deleteAllConversations() {
+    if (!selectedConfig) {
+        alert("請先設定 API 網址和 API 金鑰");
+        return;
+    }
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    if (confirm('確定要刪除所有對話嗎？')) {
+        await setConversations(conversationKey, []);
+        loadSelectedConfig();
+    }
+}
+
+async function summarizeTextFromContent(text) {
+    if (!text) {
+        alert("無資料");
+        return;
+    }
+    if (!selectedConfig) {
+        alert("請先設定 API 網址和 API 金鑰");
+        return;
+    }
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    const message = `Please summarize the following text:\n${text}\n\nUsing local language: ${navigator.language}`;
+    await addConversation(conversationKey, { role: 'user', content: message });
+    const deleteIndex = await updateConversationItem({ role: 'user', content: message });
+    try {
+        await sendRequestToAPI(selectedConfig, [{ role: 'user', content: message }], deleteIndex);
+    } catch (error) {
+        console.error('Error summarizing text:', error);
+    }
+}
+
+const languageRegex = {
+
+    'en-US': /\p{Script=Latin}|[\u0041-\u005A\u0061-\u007A]|[\u00C0-\u00D6\u00DC-\u00DD\u00DF\u00E0-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+    'fr-FR': /\p{Script=Latin}|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]|[\u00C4-\u00D6\u00DC-\u00DD\u00DF\u00E4-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+    'de-DE': /\p{Script=Latin}|[\u00C4-\u00D6\u00DC-\u00DD\u00DF\u00E4-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+    'es-ES': /\p{Script=Latin}|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]|[\u00C4-\u00D6\u00DC-\u00DD\u00DF\u00E4-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+    'it-IT': /\p{Script=Latin}|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]|[\u00C4-\u00D6\u00DC-\u00DD\u00DF\u00E4-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+
+
+    'pt-PT': /\p{Script=Latin}|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]|[\u00C4-\u00D6\u00DC-\u00DD\u00DF\u00E4-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+    'ru-RU': /\p{Script=Latin}|[\u0400-\u04FF]|[\u0500-\u052F]|[\u2DE0-\u2DFF]|[\uA640-\uA69F]|[\uFE20-\uFE2F]|[\uFE30-\uFE6F]|[\uFE70-\uFEFF]|[\uFF00-\uFFFD]|[\u10000-\u10FFFF]|[\u00C4-\u00D6\u00DC-\u00DD\u00DF\u00E4-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+    'es-ES': /\p{Script=Latin}|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]|[\u00C4-\u00D6\u00DC-\u00DD\u00DF\u00E4-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+    'tr-TR': /\p{Script=Latin}|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]|[\u00C4-\u00D6\u00DC-\u00DD\u00DF\u00E4-\u00E6\u00EC-\u00ED\u00F6-\u00F8\u00FC-\u00FD]|[\u00C0-\u00C5\u00C7-\u00D1\u00D6-\u00D9\u00DC-\u00DD\u00DF\u00E0-\u00E5\u00E7-\u00E9\u00EA-\u00EB\u00EE-\u00EF\u00F0-\u00F4\u00F6-\u00F8\u00FA-\u00FC\u00FE-\u00FF]/gu,
+
+    'zh-TW': /\p{Script=Han}|[\u3005\u3007\u3030-\u303F\u31C0-\u31FF\u3200-\u32FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFF60\uFF65-\uFFDC]/gu,    
+    'ja-JP': /\p{Script=Han}|[\u3040-\u309F\u30A0-\u30FF\u31F0-\u31FF\u3200-\u32FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFF9F]/gu,
+    'ko-KR': /\p{Script=Han}|[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F\uA000-\uA48F\uA490-\uA4CF]/gu,
+    'zh-CN': /\p{Script=Han}|[\u3005\u3007\u3030-\u303F\u31C0-\u31FF\u3200-\u32FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFF60\uFF65-\uFFDC]/gu,
+    'zh-HK': /\p{Script=Han}|[\u3005\u3007\u3030-\u303F\u31C0-\u31FF\u3200-\u32FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFF60\uFF65-\uFFDC]/gu,
+    'zh-MO': /\p{Script=Han}|[\u3005\u3007\u3030-\u303F\u31C0-\u31FF\u3200-\u32FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFF60\uFF65-\uFFDC]/gu,
+    'zh-SG': /\p{Script=Han}|[\u3005\u3007\u3030-\u303F\u31C0-\u31FF\u3200-\u32FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFF60\uFF65-\uFFDC]/gu,
+    'vi-VN': /\p{Script=Han}|[\u0100-\u017F\u0180-\u024F\u1E00-\u1EFF\u1F00-\u1FFF\u2C60-\u2C7F\uA700-\uA71F\uA720-\uA7FF]/gu,
+};
+
+function calculateLocalRatio(text) {
+    const localCharRegex = languageRegex[navigator.language];
+    const matches = text.matchAll(localCharRegex);
+    if (!matches) return 0;
+    const localChars = [...matches].filter(match => match[0] !== '').map(match => match[0]);
+    return localChars.length / text.length;
+}
+async function translateTextFromContent(text) {
+    if (!text) {
+        alert("無資料");
+        return;
+    }
+    if (!selectedConfig) {
+        alert("請先設定 API 網址和 API 金鑰");
+        return;
+    }
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    const localRatio = calculateLocalRatio(text);
+    const targetLanguage = localRatio > 0.5 ? 'en_US' : navigator.language;
+    const message = `請將以下文字翻譯成 ${targetLanguage}:\n${text}`;
+    await addConversation(conversationKey, { role: 'user', content: message });
+    const deleteIndex = await updateConversationItem({ role: 'user', content: message });
+    try {
+        await sendRequestToAPI(selectedConfig, [{ role: 'user', content: message }], deleteIndex);
+    } catch (error) {
+        console.error('Error translating text:', error);
+    }
+}
+
+async function summarizeText() {
+    const text = await getTextFromSelectionOrClipboard();
+    if (!text) {
+        alert("無資料");
+        return;
+    }
+    await summarizeTextFromContent(text);
+}
+
+async function translateText() {
+    const text = await getTextFromSelectionOrClipboard();
+    if (!text) {
+        alert("無資料");
+        return;
+    }
+    await translateTextFromContent(text);
+}
+
+async function getTextFromSelectionOrClipboard() {
+    let text = '';
+    try {
+        text = window.getSelection().toString().trim();
+        if (!text) {
+            text = await navigator.clipboard.readText().then(clipText => clipText.trim()).catch(() => '');
+        }
+    } catch (error) {
+        console.error('無法讀取選取文字或剪貼簿:', error);
+    }
+    return text;
+}
+
+function calculateEnglishRatio(text) {
+    const englishCharRegex = /[a-zA-Z]/g;
+    const matches = text.match(englishCharRegex);
+    if (!matches) return 0;
+    return matches.length / text.length;
+}
+
+// 添加控制介面狀態的函數
+function setInterfaceLoading(isLoading) {
+    const elements = [
+        document.getElementById('userInput'),
+        document.getElementById('sendMessageButton'),
+        document.getElementById('summaryButton'),
+        document.getElementById('translateButton'),
+        document.getElementById('configSelect'),
+        document.getElementById('deleteAllConversationsButton')
+    ];
+
+    elements.forEach(element => {
+        if (element) {
+            element.disabled = isLoading;
+            element.classList.toggle('loading', isLoading);
+        }
+    });
+
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    if (loadingIndicator) {
+        loadingIndicator.classList.toggle('show', isLoading);
+    }
+}
+
+async function sendRequestToAPI(config, messages, deleteIndex) {
+    try {
+        setInterfaceLoading(true); // 開始載入時禁用介面
+
+    const response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiKey}`,
+            'ngrok-skip-browser-warning': 'true' // Add this header to skip the warning page
+        },
+        body: JSON.stringify({
+            model: config.modelId,
+            messages: messages,
+            stream: true
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error('API request failed: ' + response.statusText);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    const conversationKey = `${config.apiUrl}-${selectedConfig.modelId}`;
+    accumulatedResponse = '';
+
+    currentConversationItem = document.createElement('div');
+    currentConversationItem.className = 'conversation-item';
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'conversation-content';
+
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'delete-button';
+    deleteButton.textContent = 'X';
+    deleteButton.onclick = () => confirmDeleteConversation(conversationKey, deleteIndex);
+
+    // Add copy button
+    const copyButton = document.createElement('button');
+    copyButton.className = 'copy-button';
+    copyButton.innerHTML = '&#128203;'; // Copy icon
+    copyButton.onclick = () => copyConversation(conversationKey, deleteIndex);
+
+    currentConversationItem.appendChild(contentDiv);
+    currentConversationItem.appendChild(deleteButton);
+    currentConversationItem.appendChild(copyButton);
+
+    const conversationList = document.getElementById('conversationList');
+    conversationList.appendChild(currentConversationItem);
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        accumulatedResponse += parseAndStreamResponse(chunk);
+        contentDiv.innerHTML = marked.parse(accumulatedResponse);
+
+        addCopyButtonIfCodeExists(contentDiv);
+    }
+
+    await addConversation(conversationKey, { role: 'assistant', content: accumulatedResponse });
+
+} catch (error) {
+    console.error('API request failed:', error);
+    throw error;
+} finally {
+    setInterfaceLoading(false); // 結束時啟用介面
+}
+
+}
+
+function parseAndStreamResponse(chunk) {
+    const lines = chunk.split('\n').filter(line => line.trim() !== '');
+    let accumulatedContent = '';
+    lines.forEach(line => {
+        if (line.startsWith('data: ')) {
+            const data = line.substring('data: '.length);
+            if (data === '[DONE]') {
+                return;
+            }
+            try {
+                const parsedData = JSON.parse(data);
+                if (parsedData.choices && parsedData.choices[0] && parsedData.choices[0].delta && parsedData.choices[0].delta.content) {
+                    const token = parsedData.choices[0].delta.content;
+                    accumulatedContent += token;
+                }
+            } catch (error) {
+                console.error('Error parsing JSON:', error);
+            }
+        }
+    });
+    return accumulatedContent;
+}
+
+async function loadConfigsAndCheckStorage() {
+    loadConfigs();
+    checkAndAddStoredConfig('llmUrl1', 'llmUrl1apiKey');
+    checkAndAddStoredConfig('llmUrl2', 'llmUrl2apiKey');
+    checkAndAddStoredConfig('llmUrl3', 'llmUrl3apiKey');
+}
+
+function checkAndAddStoredConfig(urlKey, apiKeyKey) {
+    chrome.storage.local.get([urlKey, apiKeyKey, 'configs'], (result) => {
+        const apiUrl = result[urlKey];
+        const apiKey = result[apiKeyKey];
+        const configs = result.configs || [];
+
+        if (apiUrl && apiKey) {
+            const existingConfig = configs.find(config => config.apiUrl === apiUrl && config.apiKey === apiKey);
+            if (!existingConfig) {
+                const newConfig = { apiUrl, apiKey, modelId: '' };
+                configs.push(newConfig);
+                chrome.storage.local.set({ configs }, () => {
+                    loadConfigs();
+                });
+            }
+        }
+    });
+}
+
+async function fetchModels() {
+    const apiUrl = document.getElementById('apiUrl').value;
+    const apiKey = document.getElementById('apiKey').value;
+    if (!apiUrl || !apiKey) return alert('請填寫 API 網址和 API 金鑰');
+    try {
+        setInterfaceLoading(true); // 開始載入時禁用介面
+        const response = await fetch(`${apiUrl}/v1/models`, {
+            headers: { 'Authorization': `Bearer ${apiKey}` ,
+                        'ngrok-skip-browser-warning': 'true'}, // Add this header to skip the warning page
+        });
+        const data = await response.json();
+        populateModelSelect(data.data);
+    } catch (error) {
+        console.error('無法取得模型列表:', error);
+        alert('無法取得模型列表，請檢查 API 網址和金鑰');
+    } finally {
+        setInterfaceLoading(false); // 結束時啟用介面
+    }
+}
+
+function populateModelSelect(models) {
+    const modelSelect = document.getElementById('modelSelect');
+    modelSelect.innerHTML = '';
+    models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.id;
+        modelSelect.appendChild(option);
+    });
+}
+
+function setSavedModelAsDefault(savedModelId) {
+    const modelSelect = document.getElementById('modelSelect');
+    const modelOption = Array.from(modelSelect.options).find(option => option.value === savedModelId);
+    if (modelOption) {
+        modelSelect.value = savedModelId;
+    }
+}
+
+function saveConfig() {
+    const apiUrl = document.getElementById('apiUrl').value;
+    const apiKey = document.getElementById('apiKey').value;
+    const modelId = document.getElementById('modelSelect').value;
+    if (!apiUrl || !apiKey) return alert('請填寫 API 網址和 API 金鑰');
+    chrome.storage.local.get({ configs: [] }, (result) => {
+        const newConfig = { apiUrl, apiKey, modelId };
+        result.configs.push(newConfig);
+        chrome.storage.local.set({ configs: result.configs }, () => {
+            loadConfigs(); // 重新加載設定以更新介面上的設定清單
+        });
+    });
+}
+
+function deleteConfig(index) {
+    chrome.storage.local.get({ configs: [] }, (result) => {
+        result.configs.splice(index, 1);
+        chrome.storage.local.set({ configs: result.configs }, () => {
+            loadConfigs(); // 重新加載設定以更新介面上的設定清單
+        });
+    });
+}
+
+function loadConfigList(configs) {
+    const configList = document.getElementById('configList');
+    configList.innerHTML = '';
+    configs.forEach((config, index) => {
+        const div = document.createElement('div');
+        div.className = 'config-item';
+        div.textContent = `${config.apiUrl} - ${config.modelId}`;
+        div.dataset.index = index;
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = 'X';
+        deleteButton.onclick = () => deleteConfig(index);
+        div.appendChild(deleteButton);
+        configList.appendChild(div);
+    });
+}
+
+function addCopyButtonIfCodeExists(container) {
+    const codeElements = container.querySelectorAll('code');
+    codeElements.forEach(codeElement => {
+        const copyButton = document.createElement('button');
+        copyButton.className = 'copy-button';
+        copyButton.innerHTML = '&#128203;'; /* Copy icon */
+        // copyButton.onclick = () => copyConversation(codeElement.innerText.substring(0, -1));
+        copyButton.onclick = function(event) {
+            // 阻止事件冒泡
+            event.stopPropagation();
+
+            // 先移除按鈕，以便後續能夠只複製文本
+            codeElement.removeChild(copyButton);
+            
+            // 複製 `code` 元素的文本内容
+            let textToCopy = codeElement.innerText;
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                console.log('Text copied to clipboard');
+            }).catch(err => {
+                console.error('Could not copy text: ', err);
+            }).finally(() => {
+                // 複製操作完成後，再將按鈕添加回來
+                codeElement.appendChild(copyButton);
+            });
+        };
+        codeElement.appendChild(copyButton);
+    });
+}
+
