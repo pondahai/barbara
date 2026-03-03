@@ -546,6 +546,195 @@ async function updateConversationItem(message) { // message is {role, content}
 
     return itemIndex + 1; // This will be the starting index for the AI's response parts
 }
+// NEW HELPER FUNCTION: Get Page Content from Active Tab
+async function getCurrentPageContext() {
+    return new Promise((resolve) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs.length > 0) {
+                const activeTab = tabs[0];
+                chrome.tabs.sendMessage(activeTab.id, { action: "getPageContent" }, (response) => {
+                    if (chrome.runtime.lastError || !response) {
+                        console.warn("無法取得網頁內容:", chrome.runtime.lastError);
+                        resolve(null);
+                    } else {
+                        resolve(response); // 回傳 {title, content}
+                    }
+                });
+            } else {
+                resolve(null);
+            }
+        });
+    });
+}
+
+// NEW HELPER FUNCTION: Get YouTube Transcript from Active Tab
+async function getYoutubeTranscriptContext() {
+    return new Promise((resolve) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs.length > 0) {
+                const activeTab = tabs[0];
+                chrome.tabs.sendMessage(activeTab.id, { action: "getYoutubeTranscript" }, (response) => {
+                    if (chrome.runtime.lastError || !response) {
+                        console.warn("無法取得 YouTube 字幕:", chrome.runtime.lastError);
+                        resolve(null);
+                    } else {
+                        resolve(response); // 回傳 {transcript, language, error}
+                    }
+                });
+            } else {
+                resolve(null);
+            }
+        });
+    });
+}
+
+// ✨ NEW: Tool Registry (模組化技能庫) ✨
+const ToolRegistry = {
+    // 技能 1: 讀網頁
+    read_current_webpage: {
+        schema: {
+            type: "function",
+            function: {
+                name: "read_current_webpage",
+                description: "當使用者要求摘要、總結、翻譯當前網頁，或詢問了需要看網頁內容（例如『這篇文章』、『這個網頁寫什麼』）才能回答的問題時，呼叫此工具。",
+                parameters: {
+                    type: "object",
+                    properties: {},
+                    required: []
+                }
+            }
+        },
+        execute: async (args) => {
+            console.log("[Tool] 正在執行 read_current_webpage...");
+            const pageData = await getCurrentPageContext();
+            if (pageData && pageData.content) {
+                return `網頁標題: ${pageData.title}\n網頁內文 (截斷至前 15000 字元):\n${pageData.content.substring(0, 15000)}`;
+            } else {
+                return "工具執行失敗，無法讀取網頁內容。";
+            }
+        }
+    },
+    /* 暫時隱藏 YouTube 字幕功能 (影片大綱)，直到找到修復方法
+    // 技能 2: 讀取 YouTube 字幕
+    get_youtube_transcript: {
+        schema: {
+            type: "function",
+            function: {
+                name: "get_youtube_transcript",
+                description: "當使用者要求摘要、總結或理解當前 YouTube 影片內容時，呼叫此工具來取得影片的 CC 字幕。",
+                parameters: {
+                    type: "object",
+                    properties: {},
+                    required: []
+                }
+            }
+        },
+        execute: async (args) => {
+            console.log("[Tool] 正在執行 get_youtube_transcript...");
+            const ytData = await getYoutubeTranscriptContext();
+            if (ytData && ytData.transcript) {
+                // Return up to a safe limit, e.g., 25000 chars
+                let limitedTranscript = ytData.transcript.substring(0, 25000);
+                return `[影片字幕內容 (語言: ${ytData.language || '未知'})]\n${limitedTranscript}`;
+            } else if (ytData && ytData.error) {
+                return \`工具執行失敗: \${ytData.error}\`;
+            } else {
+                return "工具執行失敗，無法取得 YouTube 字幕。請確定目前在 YouTube 影片頁面。";
+            }
+        }
+    }
+    */
+    // 未來可以在這裡新增技能 3...
+};
+
+// NEW FUNCTION: The Agent Loop for handling Tool Calls
+async function runAgentLoop(config, messages, conversationKey) {
+    setInterfaceLoading(true);
+    let currentMessages = [...messages];
+
+    // ✨ 動態載入所有註冊的工具 Schema ✨
+    const availableTools = Object.values(ToolRegistry).map(tool => tool.schema);
+
+    try {
+        console.log("[Agent] 第一次請求 (檢查是否需要工具)...");
+        let response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.apiKey}`,
+                'ngrok-skip-browser-warning': 'true'
+            },
+            body: JSON.stringify({
+                model: config.modelId,
+                messages: currentMessages,
+                tools: availableTools.length > 0 ? availableTools : undefined, // 避免空陣列報錯
+                stream: false // 非串流以方便攔截 Tool Call
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: response.statusText }));
+            throw new Error(`API 請求失敗: ${response.status} ${errorData.message || ''}`);
+        }
+
+        let result = await response.json();
+        let message = result.choices[0].message;
+
+        if (message.tool_calls && message.tool_calls.length > 0) {
+            console.log("[Agent] AI 要求呼叫工具數量:", message.tool_calls.length);
+
+            // 1. 將 AI 的 tool_calls 請求加進對話紀錄
+            currentMessages.push(message);
+
+            // 2. ✨ 動態處理每個工具請求 ✨
+            for (const toolCall of message.tool_calls) {
+                const toolName = toolCall.function.name;
+                const toolArgs = JSON.parse(toolCall.function.arguments || "{}");
+                console.log(`[Agent] 準備執行技能: ${toolName}`, toolArgs);
+
+                let resultString = `工具 ${toolName} 未找到或尚未註冊。`;
+
+                // 從 Registry 找出對應的工具並執行
+                if (ToolRegistry[toolName]) {
+                    try {
+                        resultString = await ToolRegistry[toolName].execute(toolArgs);
+                    } catch (e) {
+                        console.error(`[Agent] 工具執行發生未預期錯誤:`, e);
+                        resultString = `執行錯誤: ${e.message}`;
+                    }
+                } else {
+                    console.warn(`[Agent] AI 試圖呼叫未知工具: ${toolName}`);
+                }
+
+                // 3. 將每個工具執行結果以 Role: "tool" 加進對話紀錄
+                currentMessages.push({
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    name: toolName,
+                    content: resultString
+                });
+            }
+
+            // 4. 第二次請求 (遞迴或是改用串流送出最終請求)
+            // 如果我們想支援 AI 連續呼叫工具 (例如先 Google 再看網頁)，這裡應該寫成 `return await runAgentLoop(config, currentMessages, ...)`
+            // 但為了體驗流暢，假設執行完一次工具就能回答，我們就跳到串流函式發送最終請求：
+            console.log("[Agent] 工具執行完畢，發送最終請求 (使用串流)...");
+            setInterfaceLoading(false); // sendRequestToAPIWithThinkHandling 會再次開啟 Loading
+            await sendRequestToAPIWithThinkHandling(config, currentMessages, conversationKey);
+
+        } else {
+            console.log("[Agent] AI 沒有使用工具，直接回答了。");
+            // 直接儲存非串流的回應
+            await parseAndStoreFinalAssistantResponse(message.content, conversationKey);
+            loadSelectedConfig();
+        }
+    } catch (error) {
+        console.error('Agent Loop 錯誤:', error);
+        throw error;
+    } finally {
+        setInterfaceLoading(false);
+    }
+}
 
 
 async function sendMessage() {
@@ -576,8 +765,8 @@ async function sendMessage() {
     // messagesForAPI already includes the latest user message due to await addConversation
 
     try {
-        // MODIFICATION START: Call the new sendRequestToAPI which handles think tags
-        await sendRequestToAPIWithThinkHandling(selectedConfig, messagesForAPI, conversationKey);
+        // MODIFICATION START: Call the Agent Loop instead of direct streaming
+        await runAgentLoop(selectedConfig, messagesForAPI, conversationKey);
         // MODIFICATION END
     } catch (error) {
         console.error('Error sending message or processing response:', error);
