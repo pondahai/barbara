@@ -39,7 +39,8 @@
       "activeTab",
       "contextMenus",
       "sidePanel",
-      "clipboardRead"
+      "clipboardRead",
+      "scripting"
    ],
    "side_panel": {
       "default_path": "sidepanel.html"

@@ -1,5 +1,5 @@
 # barbara
-Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要和聊天功能。  
+Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要，並具備主動讀取與改寫網頁的 Agent 能力。  
   
 ## chrome外掛安裝:  
 https://chromewebstore.google.com/detail/barbara-local-ai-assistan/ccpdgcdldfgcdnfgigmnlimbnojamghi  
@@ -7,13 +7,14 @@ https://chromewebstore.google.com/detail/barbara-local-ai-assistan/ccpdgcdldfgcd
 ![image](https://github.com/user-attachments/assets/ecc21d90-3ae7-43b8-9f3a-5ee896bdc96c)
 
 
-Barbara 是一款強大且直觀的 Chrome 擴充功能，專為提升網頁瀏覽體驗而設計。利用本地運行的輕量級語言模型（如 LMStudio 或 llama.cpp），Barbara 為使用者提供高效且準確的雙語翻譯、文章摘要，以及互動式聊天功能，讓日常工作更加輕鬆。
+Barbara 是一款強大且直觀的 Chrome 擴充功能，專為提升網頁瀏覽體驗而設計。利用本地運行的輕量級語言模型（如 LMStudio 或 llama.cpp），Barbara 為使用者提供高效且準確的雙語翻譯、文章摘要，以及具備工具調用 (Function Calling) 能力的互動式聊天功能，讓日常工作與網頁操作更加輕鬆。
 
 ## 主要功能:
 
-* 雙向翻譯: 無論是中譯英或英譯中，Barbara 能夠快速且準確地翻譯網頁內容，支持多種語言的即時翻譯。
-* 文章摘要: 從長篇文章中快速提取核心信息，幫助您節省時間並快速掌握重點。
-* 互動式聊天: 內建的聊天功能使您能與人工智慧助手互動，解答疑問或提供建議。
+* **雙向翻譯**: 無論是中譯英或英譯中，Barbara 能夠快速且準確地翻譯網頁內容，支持多種語言的即時翻譯。
+* **文章摘要**: 從長篇文章中快速提取核心信息，幫助您節省時間並快速掌握重點。
+* **智慧代理 (AI Agent)**: 內建技能庫 (ToolRegistry)，AI 能主動判斷需求，抓取當下閱讀的網頁全文進行分析，或根據您的指示自動生成並注入 JavaScript 程式碼以動態修改網頁畫面。
+* **互動式聊天**: 內建的聊天功能使您能與人工智慧助手互動，解答疑問或提供建議。
 
 ## 特色:
 

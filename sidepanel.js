@@ -588,6 +588,48 @@ async function getYoutubeTranscriptContext() {
     });
 }
 
+// NEW HELPER FUNCTION: Execute JS in Active Tab
+async function executeScriptInActiveTab(code) {
+    return new Promise((resolve, reject) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs.length > 0) {
+                const activeTab = tabs[0];
+                // Check if it's a restricted URL (chrome://, etc.) before trying to inject
+                if (activeTab.url && (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('chrome-extension://'))) {
+                    reject(new Error("擴充功能無法在 Chrome 內部頁面中執行腳本。"));
+                    return;
+                }
+
+                chrome.scripting.executeScript({
+                    target: { tabId: activeTab.id },
+                    func: (codeString) => {
+                        try {
+                            // Using eval in the page context.
+                            // If it returns a value (e.g., querying DOM length), it might be a Promise, handle accordingly if needed, 
+                            // but for basic injection DOM changes, eval is sufficient.
+                            return window.eval(codeString);
+                        } catch (e) {
+                            return `腳本執行錯誤: ${e.message}`;
+                        }
+                    },
+                    args: [code],
+                    world: 'MAIN' // Inject into the page's main context to manipulate target variables if needed
+                }, (results) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (results && results[0]) {
+                        resolve(results[0].result);
+                    } else {
+                        resolve(null);
+                    }
+                });
+            } else {
+                reject(new Error("找不到活躍的標籤頁。"));
+            }
+        });
+    });
+}
+
 // ✨ NEW: Tool Registry (模組化技能庫) ✨
 const ToolRegistry = {
     // 技能 1: 讀網頁
@@ -614,8 +656,37 @@ const ToolRegistry = {
             }
         }
     },
+    // 技能 2: 執行 JavaScript 程式碼
+    execute_javascript_on_page: {
+        schema: {
+            type: "function",
+            function: {
+                name: "execute_javascript_on_page",
+                description: "當使用者要求修改網頁畫面（例如更改顏色、隱藏元素、操作 DOM）時，自動生成 Vanilla JavaScript 並呼叫此工具注入目前網頁執行。程式碼應盡量簡潔，且以操作 document 為主。",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        code: {
+                            type: "string",
+                            description: "要在網頁中執行的 JavaScript 程式碼字串。例如: 'document.body.style.backgroundColor = \"black\";'"
+                        }
+                    },
+                    required: ["code"]
+                }
+            }
+        },
+        execute: async (args) => {
+            console.log("[Tool] 正在執行 execute_javascript_on_page...", args.code);
+            try {
+                const result = await executeScriptInActiveTab(args.code);
+                return `指令已成功執行。執行結果: ${JSON.stringify(result)}`;
+            } catch (error) {
+                return `工具執行失敗: ${error.message}`;
+            }
+        }
+    }
     /* 暫時隱藏 YouTube 字幕功能 (影片大綱)，直到找到修復方法
-    // 技能 2: 讀取 YouTube 字幕
+    // 技能 3: 讀取 YouTube 字幕
     get_youtube_transcript: {
         schema: {
             type: "function",
