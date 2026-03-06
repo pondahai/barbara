@@ -12,6 +12,27 @@ chrome.runtime.onInstalled.addListener(() => {
     });
 });
 
+chrome.tabs.onActivated.addListener((activeInfo) => {
+    chrome.storage.local.get(['currentTabId'], (result) => {
+        const prevTabId = result.currentTabId || null;
+        if (prevTabId !== activeInfo.tabId) {
+            chrome.storage.local.set({
+                previousTabId: prevTabId,
+                currentTabId: activeInfo.tabId
+            });
+        }
+    });
+});
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "getPreviousTabId") {
+        chrome.storage.local.get(['previousTabId'], (result) => {
+            sendResponse({ previousTabId: result.previousTabId });
+        });
+        return true; // Keeps the message channel open for async response
+    }
+});
+
 let lastContextMenuClickTime = 0;
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {

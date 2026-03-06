@@ -684,6 +684,133 @@ const ToolRegistry = {
                 return `工具執行失敗: ${error.message}`;
             }
         }
+    },
+    // ✨ 技能 3: 開啟新分頁
+    open_new_tab: {
+        schema: {
+            type: "function",
+            function: {
+                name: "open_new_tab",
+                description: "當使用者要求開啟一個新分頁、開啟網頁、前往某個網址或搜尋某個關鍵字時，呼叫此工具。如果是直接搜尋，請將搜尋關鍵字轉換為搜尋引擎網址 (如 https://www.google.com/search?q=關鍵字)。",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        url: {
+                            type: "string",
+                            description: "要開啟的完整網址 (需包含 https:// 等協議)。例如: 'https://www.google.com/search?q=apple'"
+                        }
+                    },
+                    required: ["url"]
+                }
+            }
+        },
+        execute: async (args) => {
+            console.log("[Tool] 正在執行 open_new_tab...", args.url);
+            try {
+                return await new Promise((resolve) => {
+                    chrome.tabs.create({ url: args.url }, (tab) => {
+                        if (chrome.runtime.lastError) {
+                            resolve(`開啟失敗: ${chrome.runtime.lastError.message}`);
+                        } else {
+                            resolve(`已成功開啟新分頁: ${args.url}`);
+                        }
+                    });
+                });
+            } catch (error) {
+                return `工具執行失敗: ${error.message}`;
+            }
+        }
+    },
+    // ✨ 技能 4: 切換到上一個分頁
+    switch_to_previous_tab: {
+        schema: {
+            type: "function",
+            function: {
+                name: "switch_to_previous_tab",
+                description: "當使用者要求回到上一個分頁、切換回剛剛的分頁時，呼叫此工具。",
+                parameters: {
+                    type: "object",
+                    properties: {},
+                    required: []
+                }
+            }
+        },
+        execute: async (args) => {
+            console.log("[Tool] 正在執行 switch_to_previous_tab...");
+            try {
+                return await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({ action: "getPreviousTabId" }, (response) => {
+                        if (chrome.runtime.lastError || !response || !response.previousTabId) {
+                            resolve("無法取得上一個分頁，可能是沒有紀錄或該分頁已關閉。");
+                            return;
+                        }
+                        chrome.tabs.update(response.previousTabId, { active: true }, (tab) => {
+                            if (chrome.runtime.lastError) {
+                                resolve(`切換失敗: ${chrome.runtime.lastError.message}`);
+                            } else {
+                                chrome.windows.update(tab.windowId, { focused: true }, () => {
+                                    resolve(`已成功切換回上一個分頁。`);
+                                });
+                            }
+                        });
+                    });
+                });
+            } catch (error) {
+                return `工具執行失敗: ${error.message}`;
+            }
+        }
+    },
+    // ✨ 技能 5: 切換到特定分頁
+    switch_to_tab: {
+        schema: {
+            type: "function",
+            function: {
+                name: "switch_to_tab",
+                description: "當使用者要求切換到某個特定標題或網址的分頁時 (例如切換到 YouTube、切換到 Google)，呼叫此工具。",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        keyword: {
+                            type: "string",
+                            description: "使用者想要切換到的分頁名稱或網址關鍵字"
+                        }
+                    },
+                    required: ["keyword"]
+                }
+            }
+        },
+        execute: async (args) => {
+            console.log("[Tool] 正在執行 switch_to_tab...", args.keyword);
+            try {
+                return await new Promise((resolve) => {
+                    chrome.tabs.query({}, (tabs) => {
+                        if (chrome.runtime.lastError) {
+                            resolve(`查詢分頁失敗: ${chrome.runtime.lastError.message}`);
+                            return;
+                        }
+                        const keyword = args.keyword.toLowerCase();
+                        let targetTab = null;
+
+                        targetTab = tabs.find(tab => tab.title && tab.title.toLowerCase().includes(keyword));
+                        if (!targetTab) {
+                            targetTab = tabs.find(tab => tab.url && tab.url.toLowerCase().includes(keyword));
+                        }
+
+                        if (targetTab) {
+                            chrome.tabs.update(targetTab.id, { active: true }, () => {
+                                chrome.windows.update(targetTab.windowId, { focused: true }, () => {
+                                    resolve(`已成功切換到分頁: ${targetTab.title}`);
+                                });
+                            });
+                        } else {
+                            resolve(`找不到包含關鍵字 "${args.keyword}" 的分頁。`);
+                        }
+                    });
+                });
+            } catch (error) {
+                return `工具執行失敗: ${error.message}`;
+            }
+        }
     }
     /* 暫時隱藏 YouTube 字幕功能 (影片大綱)，直到找到修復方法
     // 技能 3: 讀取 YouTube 字幕
