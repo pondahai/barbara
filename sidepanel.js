@@ -846,154 +846,42 @@ const ToolRegistry = {
     // 未來可以在這裡新增技能 3...
 };
 
-// NEW FUNCTION: The Agent Loop for handling Tool Calls
-async function runAgentLoop(config, messages, conversationKey) {
+// NEW FUNCTION: Unified Agent Stream Loop
+async function runAgentStreamLoop(config, messages, conversationKey) {
     setInterfaceLoading(true);
     let currentMessages = [...messages];
 
-    // ✨ 動態載入所有註冊的工具 Schema ✨
-    const availableTools = Object.values(ToolRegistry).map(tool => tool.schema);
-
-    try {
-        console.log("[Agent] 第一次請求 (檢查是否需要工具)...");
-        let response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.apiKey}`,
-                'ngrok-skip-browser-warning': 'true'
-            },
-            body: JSON.stringify({
-                model: config.modelId,
-                messages: currentMessages,
-                tools: availableTools.length > 0 ? availableTools : undefined, // 避免空陣列報錯
-                stream: false // 非串流以方便攔截 Tool Call
-            })
+    if (currentMessages.length > 0 && currentMessages[0].role !== 'system') {
+        currentMessages.unshift({
+            role: 'system',
+            content: 'You are a helpful AI assistant. You have access to tools and can use them to fulfill the user prompt.'
         });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ message: response.statusText }));
-            throw new Error(`API 請求失敗: ${response.status} ${errorData.message || ''}`);
-        }
-
-        let result = await response.json();
-        let message = result.choices[0].message;
-
-        if (message.tool_calls && message.tool_calls.length > 0) {
-            console.log("[Agent] AI 要求呼叫工具數量:", message.tool_calls.length);
-
-            // 1. 將 AI 的 tool_calls 請求加進對話紀錄
-            currentMessages.push(message);
-
-            // 2. ✨ 動態處理每個工具請求 ✨
-            for (const toolCall of message.tool_calls) {
-                const toolName = toolCall.function.name;
-                const toolArgs = JSON.parse(toolCall.function.arguments || "{}");
-                console.log(`[Agent] 準備執行技能: ${toolName}`, toolArgs);
-
-                let resultString = `工具 ${toolName} 未找到或尚未註冊。`;
-
-                // 從 Registry 找出對應的工具並執行
-                if (ToolRegistry[toolName]) {
-                    try {
-                        resultString = await ToolRegistry[toolName].execute(toolArgs);
-                    } catch (e) {
-                        console.error(`[Agent] 工具執行發生未預期錯誤:`, e);
-                        resultString = `執行錯誤: ${e.message}`;
-                    }
-                } else {
-                    console.warn(`[Agent] AI 試圖呼叫未知工具: ${toolName}`);
-                }
-
-                // 3. 將每個工具執行結果以 Role: "tool" 加進對話紀錄
-                currentMessages.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    name: toolName,
-                    content: resultString
-                });
-            }
-
-            // 4. 第二次請求 (遞迴或是改用串流送出最終請求)
-            // 如果我們想支援 AI 連續呼叫工具 (例如先 Google 再看網頁)，這裡應該寫成 `return await runAgentLoop(config, currentMessages, ...)`
-            console.log("[Agent] 工具執行完畢，準備進入下一輪迴圈...");
-            return await runAgentLoop(config, currentMessages, conversationKey);
-
-        } else {
-            console.log("[Agent] AI 沒有使用工具，直接回答了。");
-            // 直接儲存非串流的回應
-            await parseAndStoreFinalAssistantResponse(message.content, conversationKey);
-            loadSelectedConfig();
-        }
-    } catch (error) {
-        console.error('Agent Loop 錯誤:', error);
-        throw error;
-    } finally {
-        setInterfaceLoading(false);
-    }
-}
-
-
-async function sendMessage() {
-    const userInputElement = document.getElementById('userInput'); // Renamed from userInput to avoid conflict with variable
-    const userInputText = userInputElement ? userInputElement.value.trim() : ""; // MODIFIED: use userInputText
-    if (!userInputText) return;
-
-    if (!selectedConfig || !selectedConfig.apiUrl || !selectedConfig.modelId) { // MODIFIED: check modelId too
-        alert("請先完整設定 API (網址、金鑰、模型)。");
-        return;
     }
 
-    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
-    const userMessage = { role: 'user', content: userInputText }; // No isThinking for user
-
-    await addConversation(conversationKey, userMessage);
-    // ORIGINAL: const deleteIndex = await updateConversationItem(userMessage);
-    // MODIFICATION: We'll call loadSelectedConfig at the end of sendRequestToAPI to refresh the whole list
-    // For now, just display the user message.
-    await updateConversationItem(userMessage); // Display user message immediately
-
-    if (userInputElement) userInputElement.value = '';
-
-    const conversationsHistory = await getConversations(conversationKey);
-    const messagesForAPI = conversationsHistory
-        .filter(conv => !conv.isThinking) // Exclude thinking processes from API history
-        .map(conv => ({ role: conv.role, content: conv.content }));
-    // messagesForAPI already includes the latest user message due to await addConversation
-
-    try {
-        // MODIFICATION START: Call the Agent Loop instead of direct streaming
-        await runAgentLoop(selectedConfig, messagesForAPI, conversationKey);
-        // MODIFICATION END
-    } catch (error) {
-        console.error('Error sending message or processing response:', error);
-        // Display error as a message in the UI
-        const errorResponseMessage = { role: 'assistant', content: `錯誤: ${error.message}`, isThinking: false };
-        await addConversation(conversationKey, errorResponseMessage);
-        loadSelectedConfig(); // Reload to show the error message
-    }
-}
-
-
-// NEW FUNCTION: sendRequestToAPI with <think> tag handling
-async function sendRequestToAPIWithThinkHandling(config, messages, conversationKey) {
-    setInterfaceLoading(true);
-    accumulatedResponse = ''; // Reset accumulated parsed content tokens
+    const availableTools = Object.values(ToolRegistry).map(tool => tool.schema);
+    accumulatedResponse = '';
     streamingDOMs.main = null;
     streamingDOMs.think = null;
     currentStreamIsThinking = false;
-    let currentAccumulatedTextForDOM = ""; // Text for the current DOM block being streamed
+    let currentAccumulatedTextForDOM = "";
 
-    // Store a reference to the conversation list
     const conversationList = document.getElementById('conversationList');
-
-    // Create temporary DOM elements for streaming AI response
-    // These will be removed and replaced by proper rendering from storage after stream ends
     let tempMainResponseDiv = null;
     let tempThinkDetailsDiv = null;
     let tempThinkContentDiv = null;
 
+    let responseToolCalls = [];
+
     try {
+        const payload = {
+            model: config.modelId,
+            messages: currentMessages,
+            stream: true
+        };
+        if (availableTools.length > 0) {
+            payload.tools = availableTools;
+        }
+
         const response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
             method: 'POST',
             headers: {
@@ -1001,11 +889,7 @@ async function sendRequestToAPIWithThinkHandling(config, messages, conversationK
                 'Authorization': `Bearer ${config.apiKey}`,
                 'ngrok-skip-browser-warning': 'true'
             },
-            body: JSON.stringify({
-                model: config.modelId,
-                messages: messages,
-                stream: true
-            })
+            body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
@@ -1015,117 +899,229 @@ async function sendRequestToAPIWithThinkHandling(config, messages, conversationK
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
+        let streamBuffer = '';
 
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
-            const rawChunk = decoder.decode(value, { stream: true });
-            const contentTokens = parseAndStreamResponse(rawChunk); // Use original parsing function for tokens
+            streamBuffer += decoder.decode(value, { stream: true });
+            let newlineIndex;
+            while ((newlineIndex = streamBuffer.indexOf('\n')) >= 0) {
+                const line = streamBuffer.slice(0, newlineIndex).trim();
+                streamBuffer = streamBuffer.slice(newlineIndex + 1);
 
-            if (contentTokens) {
-                accumulatedResponse += contentTokens; // Accumulate parsed tokens for final processing
+                if (line.startsWith('data: ')) {
+                    const data = line.substring(6);
+                    if (data.toUpperCase() === '[DONE]') continue;
+                    try {
+                        const parsedData = JSON.parse(data);
+                        const delta = parsedData.choices && parsedData.choices[0] && parsedData.choices[0].delta;
+                        if (!delta) continue;
 
-                let processableTokenStream = contentTokens;
-                while (processableTokenStream.length > 0) {
-                    if (!currentStreamIsThinking) { // Handling main response content
-                        const thinkStartIndex = processableTokenStream.indexOf('<think>');
-                        if (thinkStartIndex !== -1) { // Found <think>
-                            const beforeThinkText = processableTokenStream.substring(0, thinkStartIndex);
-                            if (beforeThinkText) {
-                                currentAccumulatedTextForDOM += beforeThinkText;
-                                if (!tempMainResponseDiv) {
-                                    const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message streaming';
-                                    tempMainResponseDiv = document.createElement('div'); tempMainResponseDiv.className = 'conversation-content';
-                                    itemDiv.appendChild(tempMainResponseDiv);
-                                    conversationList.appendChild(itemDiv);
+                        if (delta.tool_calls) {
+                            for (const tc of delta.tool_calls) {
+                                if (!responseToolCalls[tc.index]) {
+                                    responseToolCalls[tc.index] = {
+                                        id: tc.id || "",
+                                        type: "function",
+                                        function: { name: tc.function.name || "", arguments: tc.function.arguments || "" }
+                                    };
+                                } else {
+                                    if (tc.function.name) responseToolCalls[tc.index].function.name += tc.function.name;
+                                    if (tc.function.arguments) responseToolCalls[tc.index].function.arguments += tc.function.arguments;
                                 }
-                                tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
                             }
-                            currentStreamIsThinking = true;
-                            currentAccumulatedTextForDOM = ""; // Reset for think block
-                            // tempMainResponseDiv remains until </think> or end of stream
-                            processableTokenStream = processableTokenStream.substring(thinkStartIndex + '<think>'.length);
-                        } else { // No <think> in this token part, all main response
-                            currentAccumulatedTextForDOM += processableTokenStream;
-                            if (!tempMainResponseDiv) {
-                                const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message streaming';
-                                tempMainResponseDiv = document.createElement('div'); tempMainResponseDiv.className = 'conversation-content';
-                                itemDiv.appendChild(tempMainResponseDiv);
-                                conversationList.appendChild(itemDiv);
-                            }
-                            tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
-                            processableTokenStream = "";
                         }
-                    } else { // Handling <think> content (currentStreamIsThinking is true)
-                        const thinkEndIndex = processableTokenStream.indexOf('</think>');
-                        if (thinkEndIndex !== -1) { // Found </think>
-                            const inThinkText = processableTokenStream.substring(0, thinkEndIndex);
-                            if (inThinkText) {
-                                currentAccumulatedTextForDOM += inThinkText;
-                                if (!tempThinkDetailsDiv) {
-                                    const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message thinking-process streaming';
-                                    tempThinkDetailsDiv = document.createElement('details');
-                                    const summary = document.createElement('summary'); summary.textContent = 'AI 思考中...';
-                                    tempThinkDetailsDiv.appendChild(summary);
-                                    tempThinkContentDiv = document.createElement('div'); tempThinkContentDiv.className = 'thinking-content-inner';
-                                    tempThinkDetailsDiv.appendChild(tempThinkContentDiv);
-                                    itemDiv.appendChild(tempThinkDetailsDiv);
-                                    conversationList.appendChild(itemDiv);
-                                    tempThinkDetailsDiv.open = true; // Expand while streaming
+
+                        if (delta.content) {
+                            const contentTokens = delta.content;
+                            accumulatedResponse += contentTokens;
+
+                            let processableTokenStream = contentTokens;
+                            while (processableTokenStream.length > 0) {
+                                if (!currentStreamIsThinking) {
+                                    const thinkStartIndex = processableTokenStream.indexOf('<think>');
+                                    if (thinkStartIndex !== -1) {
+                                        const beforeThinkText = processableTokenStream.substring(0, thinkStartIndex);
+                                        if (beforeThinkText) {
+                                            currentAccumulatedTextForDOM += beforeThinkText;
+                                            if (!tempMainResponseDiv) {
+                                                const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message streaming';
+                                                tempMainResponseDiv = document.createElement('div'); tempMainResponseDiv.className = 'conversation-content';
+                                                itemDiv.appendChild(tempMainResponseDiv);
+                                                conversationList.appendChild(itemDiv);
+                                            }
+                                            tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
+                                        }
+                                        currentStreamIsThinking = true;
+                                        currentAccumulatedTextForDOM = "";
+                                        processableTokenStream = processableTokenStream.substring(thinkStartIndex + '<think>'.length);
+                                    } else {
+                                        currentAccumulatedTextForDOM += processableTokenStream;
+                                        if (!tempMainResponseDiv) {
+                                            const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message streaming';
+                                            tempMainResponseDiv = document.createElement('div'); tempMainResponseDiv.className = 'conversation-content';
+                                            itemDiv.appendChild(tempMainResponseDiv);
+                                            conversationList.appendChild(itemDiv);
+                                        }
+                                        tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
+                                        processableTokenStream = "";
+                                    }
+                                } else {
+                                    const thinkEndIndex = processableTokenStream.indexOf('</think>');
+                                    if (thinkEndIndex !== -1) {
+                                        const inThinkText = processableTokenStream.substring(0, thinkEndIndex);
+                                        if (inThinkText) {
+                                            currentAccumulatedTextForDOM += inThinkText;
+                                            if (!tempThinkDetailsDiv) {
+                                                const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message thinking-process streaming';
+                                                tempThinkDetailsDiv = document.createElement('details');
+                                                const summary = document.createElement('summary'); summary.textContent = 'AI 思考中...';
+                                                tempThinkDetailsDiv.appendChild(summary);
+                                                tempThinkContentDiv = document.createElement('div'); tempThinkContentDiv.className = 'thinking-content-inner';
+                                                tempThinkDetailsDiv.appendChild(tempThinkContentDiv);
+                                                itemDiv.appendChild(tempThinkDetailsDiv);
+                                                conversationList.appendChild(itemDiv);
+                                                tempThinkDetailsDiv.open = true;
+                                            }
+                                            tempThinkContentDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
+                                        }
+                                        currentStreamIsThinking = false;
+                                        currentAccumulatedTextForDOM = "";
+                                        processableTokenStream = processableTokenStream.substring(thinkEndIndex + '</think>'.length);
+                                    } else {
+                                        currentAccumulatedTextForDOM += processableTokenStream;
+                                        if (!tempThinkDetailsDiv) {
+                                            const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message thinking-process streaming';
+                                            tempThinkDetailsDiv = document.createElement('details');
+                                            const summary = document.createElement('summary'); summary.textContent = 'AI 思考中...';
+                                            tempThinkDetailsDiv.appendChild(summary);
+                                            tempThinkContentDiv = document.createElement('div'); tempThinkContentDiv.className = 'thinking-content-inner';
+                                            tempThinkDetailsDiv.appendChild(tempThinkContentDiv);
+                                            itemDiv.appendChild(tempThinkDetailsDiv);
+                                            conversationList.appendChild(itemDiv);
+                                            tempThinkDetailsDiv.open = true;
+                                        }
+                                        tempThinkContentDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
+                                        processableTokenStream = "";
+                                    }
                                 }
-                                tempThinkContentDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
                             }
-                            currentStreamIsThinking = false;
-                            currentAccumulatedTextForDOM = ""; // Reset for main response block
-                            // tempThinkDetailsDiv remains until new <think> or end of stream
-                            processableTokenStream = processableTokenStream.substring(thinkEndIndex + '</think>'.length);
-                        } else { // No </think> in this token part, all think content
-                            currentAccumulatedTextForDOM += processableTokenStream;
-                            if (!tempThinkDetailsDiv) {
-                                const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message thinking-process streaming';
-                                tempThinkDetailsDiv = document.createElement('details');
-                                const summary = document.createElement('summary'); summary.textContent = 'AI 思考中...';
-                                tempThinkDetailsDiv.appendChild(summary);
-                                tempThinkContentDiv = document.createElement('div'); tempThinkContentDiv.className = 'thinking-content-inner';
-                                tempThinkDetailsDiv.appendChild(tempThinkContentDiv);
-                                itemDiv.appendChild(tempThinkDetailsDiv);
-                                conversationList.appendChild(itemDiv);
-                                tempThinkDetailsDiv.open = true;
-                            }
-                            tempThinkContentDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
-                            processableTokenStream = "";
                         }
+                    } catch (error) {
                     }
-                } // end while (processableTokenStream)
-            } // end if (contentTokens)
+                }
+            }
             scrollToBottom();
-        } // end while (reader.read())
+        }
 
-        // Streaming finished, remove cursor from last updated temp DOM
         if (currentStreamIsThinking && tempThinkContentDiv && tempThinkContentDiv.innerHTML.endsWith("▍")) {
             tempThinkContentDiv.innerHTML = tempThinkContentDiv.innerHTML.slice(0, -1);
         } else if (!currentStreamIsThinking && tempMainResponseDiv && tempMainResponseDiv.innerHTML.endsWith("▍")) {
             tempMainResponseDiv.innerHTML = tempMainResponseDiv.innerHTML.slice(0, -1);
         }
 
-        // Now, process the complete 'accumulatedResponse' to split and store correctly.
-        // The temporary streaming DOMs will be cleared by loadSelectedConfig -> loadConversations.
-        await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
+        const validToolCalls = responseToolCalls.filter(tc => tc !== null && tc !== undefined);
+        if (validToolCalls.length > 0) {
+            console.log("[Agent] AI 要求呼叫工具數量:", validToolCalls.length);
+
+            const assistMsg = {
+                role: "assistant",
+                content: accumulatedResponse || null,
+                tool_calls: validToolCalls
+            };
+            currentMessages.push(assistMsg);
+
+            for (const toolCall of validToolCalls) {
+                const toolName = toolCall.function.name;
+                const toolArgsString = toolCall.function.arguments || "{}";
+                console.log(`[Agent] 準備執行技能: ${toolName}`, toolArgsString);
+
+                const stepDiv = document.createElement('div'); stepDiv.className = 'conversation-item assistant-message thinking-process';
+                const stepDetails = document.createElement('details'); stepDetails.open = true;
+                const stepSummary = document.createElement('summary'); stepSummary.textContent = `⚙️ 正在處理步驟: ${toolName}`;
+                stepDetails.appendChild(stepSummary);
+                const stepInner = document.createElement('div'); stepInner.className = 'thinking-content-inner';
+                stepInner.textContent = `參數: ${toolArgsString}`;
+                stepDetails.appendChild(stepInner);
+                stepDiv.appendChild(stepDetails);
+                conversationList.appendChild(stepDiv);
+                scrollToBottom();
+
+                let toolArgs = {};
+                try { toolArgs = JSON.parse(toolArgsString); } catch (e) { }
+
+                let resultString = `工具 ${toolName} 未找到或尚未註冊。`;
+                if (ToolRegistry[toolName]) {
+                    try {
+                        resultString = await ToolRegistry[toolName].execute(toolArgs);
+                    } catch (e) {
+                        resultString = `執行錯誤: ${e.message}`;
+                    }
+                }
+
+                stepInner.textContent += `\n\n[執行結果]\n${resultString}`;
+
+                currentMessages.push({
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    name: toolName,
+                    content: resultString
+                });
+            }
+
+            console.log("[Agent] 工具執行完畢，進入下一輪迴圈...");
+            return await runAgentStreamLoop(config, currentMessages, conversationKey);
+        } else {
+            console.log("[Agent] 最終對話生成完畢。");
+            await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
+            loadSelectedConfig();
+        }
 
     } catch (error) {
         console.error('API request or streaming failed:', error);
         await addConversation(conversationKey, { role: 'assistant', content: `錯誤: ${error.message}`, isThinking: false });
-        // throw error; // Re-throw if an outer handler needs it, or handle fully here.
+        loadSelectedConfig();
     } finally {
         setInterfaceLoading(false);
-        // Crucially, reload conversations from storage to get the final, correctly-indexed items
-        loadSelectedConfig();
-        accumulatedResponse = ''; // Clear for next message
-        // Reset streaming state variables
+        accumulatedResponse = '';
         streamingDOMs.main = null;
         streamingDOMs.think = null;
         currentStreamIsThinking = false;
+    }
+}
+
+async function sendMessage() {
+    const userInputElement = document.getElementById('userInput');
+    const userInputText = userInputElement ? userInputElement.value.trim() : "";
+    if (!userInputText) return;
+
+    if (!selectedConfig || !selectedConfig.apiUrl || !selectedConfig.modelId) {
+        alert("請先完整設定 API (網址、金鑰、模型)。");
+        return;
+    }
+
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    const userMessage = { role: 'user', content: userInputText };
+
+    await addConversation(conversationKey, userMessage);
+    await updateConversationItem(userMessage);
+
+    if (userInputElement) userInputElement.value = '';
+
+    const conversationsHistory = await getConversations(conversationKey);
+    const messagesForAPI = conversationsHistory
+        .filter(conv => !conv.isThinking)
+        .map(conv => ({ role: conv.role, content: conv.content }));
+
+    try {
+        await runAgentStreamLoop(selectedConfig, messagesForAPI, conversationKey);
+    } catch (error) {
+        console.error('Error sending message or processing response:', error);
+        const errorResponseMessage = { role: 'assistant', content: `錯誤: ${error.message}`, isThinking: false };
+        await addConversation(conversationKey, errorResponseMessage);
+        loadSelectedConfig();
     }
 }
 // END NEW FUNCTION
@@ -1300,8 +1296,7 @@ async function summarizeTextFromContent(text) {
     await updateConversationItem(userMessage); // Just display user message
 
     try {
-        // MODIFIED: Call the new sendRequestToAPI which handles think tags
-        await sendRequestToAPIWithThinkHandling(selectedConfig, [{ role: 'user', content: messageContent }], conversationKey);
+        await runAgentStreamLoop(selectedConfig, [{ role: 'user', content: messageContent }], conversationKey);
     } catch (error) {
         console.error('Error summarizing text:', error);
         const errorResponseMessage = { role: 'assistant', content: `摘要錯誤: ${error.message}`, isThinking: false };
@@ -1365,8 +1360,7 @@ async function translateTextFromContent(text) {
     await updateConversationItem(userMessage); // Just display user message
 
     try {
-        // MODIFIED: Call the new sendRequestToAPI which handles think tags
-        await sendRequestToAPIWithThinkHandling(selectedConfig, [{ role: 'user', content: messageContent }], conversationKey);
+        await runAgentStreamLoop(selectedConfig, [{ role: 'user', content: messageContent }], conversationKey);
     } catch (error) {
         console.error('Error translating text:', error);
         const errorResponseMessage = { role: 'assistant', content: `翻譯錯誤: ${error.message}`, isThinking: false };
