@@ -1071,7 +1071,9 @@ async function runAgentStreamLoop(config, messages, conversationKey) {
                 });
             }
 
-            console.log("[Agent] 工具執行完畢，進入下一輪迴圈...");
+            console.log("[Agent] 工具執行完畢，停頓 2 秒以避免 API 速率限制 (Rate Limit)，進入下一輪迴圈...");
+            // 新增延遲，避免免費 API (如 Groq, Cerebras) 觸發 429 Too Many Requests
+            await new Promise(resolve => setTimeout(resolve, 2000));
             return await runAgentStreamLoop(config, currentMessages, conversationKey);
         } else {
             console.log("[Agent] 最終對話生成完畢。");
