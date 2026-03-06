@@ -604,10 +604,11 @@ async function executeScriptInActiveTab(code) {
                     target: { tabId: activeTab.id },
                     func: (codeString) => {
                         try {
-                            // Using eval in the page context.
-                            // If it returns a value (e.g., querying DOM length), it might be a Promise, handle accordingly if needed, 
-                            // but for basic injection DOM changes, eval is sufficient.
-                            return window.eval(codeString);
+                            const script = document.createElement('script');
+                            script.textContent = codeString;
+                            document.documentElement.appendChild(script);
+                            script.remove();
+                            return "腳本已注入執行";
                         } catch (e) {
                             return `腳本執行錯誤: ${e.message}`;
                         }
@@ -915,10 +916,8 @@ async function runAgentLoop(config, messages, conversationKey) {
 
             // 4. 第二次請求 (遞迴或是改用串流送出最終請求)
             // 如果我們想支援 AI 連續呼叫工具 (例如先 Google 再看網頁)，這裡應該寫成 `return await runAgentLoop(config, currentMessages, ...)`
-            // 但為了體驗流暢，假設執行完一次工具就能回答，我們就跳到串流函式發送最終請求：
-            console.log("[Agent] 工具執行完畢，發送最終請求 (使用串流)...");
-            setInterfaceLoading(false); // sendRequestToAPIWithThinkHandling 會再次開啟 Loading
-            await sendRequestToAPIWithThinkHandling(config, currentMessages, conversationKey);
+            console.log("[Agent] 工具執行完畢，準備進入下一輪迴圈...");
+            return await runAgentLoop(config, currentMessages, conversationKey);
 
         } else {
             console.log("[Agent] AI 沒有使用工具，直接回答了。");
