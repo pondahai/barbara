@@ -1033,48 +1033,123 @@ async function runAgentStreamLoop(config, messages, conversationKey) {
             };
             currentMessages.push(assistMsg);
 
-            for (const toolCall of validToolCalls) {
-                const toolName = toolCall.function.name;
-                const toolArgsString = toolCall.function.arguments || "{}";
-                console.log(`[Agent] 準備執行技能: ${toolName}`, toolArgsString);
+            // [新增] 產生使用者確認 UI
+            const confirmationDiv = document.createElement('div');
+            confirmationDiv.className = 'conversation-item assistant-message thinking-process';
+            confirmationDiv.style.border = "1px solid #ffcc00";
+            confirmationDiv.style.borderRadius = "5px";
+            confirmationDiv.style.padding = "5px";
+            // 讓背景色可以適應淺色/深色，這裡使用透明度較高的黃色
+            confirmationDiv.style.backgroundColor = "rgba(255, 204, 0, 0.1)";
 
-                const stepDiv = document.createElement('div'); stepDiv.className = 'conversation-item assistant-message thinking-process';
-                const stepDetails = document.createElement('details'); stepDetails.open = true;
-                const stepSummary = document.createElement('summary'); stepSummary.textContent = `⚙️ 正在處理步驟: ${toolName}`;
-                stepDetails.appendChild(stepSummary);
-                const stepInner = document.createElement('div'); stepInner.className = 'thinking-content-inner';
-                stepInner.textContent = `參數: ${toolArgsString}`;
-                stepDetails.appendChild(stepInner);
-                stepDiv.appendChild(stepDetails);
-                conversationList.appendChild(stepDiv);
-                scrollToBottom();
+            const toolNames = validToolCalls.map(tc => tc.function.name).join(", ");
+            const confSummary = document.createElement('div');
+            confSummary.innerHTML = `<strong>⚠️ 代理請求執行以下工具:</strong><br><code style="background-color: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px;">${toolNames}</code><br><br>請確認是否允許執行此操作？`;
+            confSummary.style.padding = "10px";
 
-                let toolArgs = {};
-                try { toolArgs = JSON.parse(toolArgsString); } catch (e) { }
+            const btnContainer = document.createElement('div');
+            btnContainer.style.padding = "0 10px 10px 10px";
+            btnContainer.style.display = "flex";
+            btnContainer.style.gap = "10px";
 
-                let resultString = `工具 ${toolName} 未找到或尚未註冊。`;
-                if (ToolRegistry[toolName]) {
-                    try {
-                        resultString = await ToolRegistry[toolName].execute(toolArgs);
-                    } catch (e) {
-                        resultString = `執行錯誤: ${e.message}`;
+            const approveBtn = document.createElement('button');
+            approveBtn.textContent = '允許 (Approve)';
+            approveBtn.style.backgroundColor = "#4CAF50";
+            approveBtn.style.color = "white";
+            approveBtn.style.border = "none";
+            approveBtn.style.padding = "6px 12px";
+            approveBtn.style.cursor = "pointer";
+            approveBtn.style.borderRadius = "4px";
+
+            const denyBtn = document.createElement('button');
+            denyBtn.textContent = '拒絕 (Deny)';
+            denyBtn.style.backgroundColor = "#f44336";
+            denyBtn.style.color = "white";
+            denyBtn.style.border = "none";
+            denyBtn.style.padding = "6px 12px";
+            denyBtn.style.cursor = "pointer";
+            denyBtn.style.borderRadius = "4px";
+
+            btnContainer.appendChild(approveBtn);
+            btnContainer.appendChild(denyBtn);
+            confirmationDiv.appendChild(confSummary);
+            confirmationDiv.appendChild(btnContainer);
+            conversationList.appendChild(confirmationDiv);
+            scrollToBottom();
+
+            // [新增] 等待使用者決策
+            const userDecision = await new Promise((resolve) => {
+                approveBtn.onclick = () => {
+                    confirmationDiv.style.opacity = "0.5";
+                    approveBtn.disabled = true;
+                    denyBtn.disabled = true;
+                    resolve(true);
+                };
+                denyBtn.onclick = () => {
+                    confirmationDiv.style.opacity = "0.5";
+                    approveBtn.disabled = true;
+                    denyBtn.disabled = true;
+                    resolve(false);
+                };
+            });
+
+            if (userDecision) {
+                for (const toolCall of validToolCalls) {
+                    const toolName = toolCall.function.name;
+                    const toolArgsString = toolCall.function.arguments || "{}";
+                    console.log(`[Agent] 準備執行技能: ${toolName}`, toolArgsString);
+
+                    const stepDiv = document.createElement('div'); stepDiv.className = 'conversation-item assistant-message thinking-process';
+                    const stepDetails = document.createElement('details'); stepDetails.open = true;
+                    const stepSummary = document.createElement('summary'); stepSummary.textContent = `⚙️ 正在處理步驟: ${toolName}`;
+                    stepDetails.appendChild(stepSummary);
+                    const stepInner = document.createElement('div'); stepInner.className = 'thinking-content-inner';
+                    stepInner.textContent = `參數: ${toolArgsString}`;
+                    stepDetails.appendChild(stepInner);
+                    stepDiv.appendChild(stepDetails);
+                    conversationList.appendChild(stepDiv);
+                    scrollToBottom();
+
+                    let toolArgs = {};
+                    try { toolArgs = JSON.parse(toolArgsString); } catch (e) { }
+
+                    let resultString = `工具 ${toolName} 未找到或尚未註冊。`;
+                    if (ToolRegistry[toolName]) {
+                        try {
+                            resultString = await ToolRegistry[toolName].execute(toolArgs);
+                        } catch (e) {
+                            resultString = `執行錯誤: ${e.message}`;
+                        }
                     }
+
+                    stepInner.textContent += `\n\n[執行結果]\n${resultString}`;
+
+                    currentMessages.push({
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        name: toolName,
+                        content: resultString
+                    });
                 }
 
-                stepInner.textContent += `\n\n[執行結果]\n${resultString}`;
+                console.log("[Agent] 工具執行完畢，停頓 2 秒以避免 API 速率限制 (Rate Limit)，進入下一輪迴圈...");
+                // 新增延遲，避免免費 API (如 Groq, Cerebras) 觸發 429 Too Many Requests
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                return await runAgentStreamLoop(config, currentMessages, conversationKey);
+            } else {
+                console.log("[Agent] 使用者拒絕執行工具。");
+                const declinedDiv = document.createElement('div');
+                declinedDiv.className = 'conversation-item assistant-message';
+                declinedDiv.innerHTML = '<div class="conversation-content" style="color:#d9534f;"><i>(工具執行已被使用者拒絕，中止當前回圈)</i></div>';
+                conversationList.appendChild(declinedDiv);
+                scrollToBottom();
 
-                currentMessages.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    name: toolName,
-                    content: resultString
-                });
+                // 拒絕後直接結束生成，保存目前為止的對話
+                await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
+                await addConversation(conversationKey, { role: 'assistant', content: `[系統通知] Agent 工具執行已被您拒絕。`, isThinking: false });
+                loadSelectedConfig();
+                return;
             }
-
-            console.log("[Agent] 工具執行完畢，停頓 2 秒以避免 API 速率限制 (Rate Limit)，進入下一輪迴圈...");
-            // 新增延遲，避免免費 API (如 Groq, Cerebras) 觸發 429 Too Many Requests
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            return await runAgentStreamLoop(config, currentMessages, conversationKey);
         } else {
             console.log("[Agent] 最終對話生成完畢。");
             await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
@@ -1705,10 +1780,18 @@ function addCopyButtonIfCodeExists(container) {
 
 // NEW: Helper to scroll conversation list to bottom
 function scrollToBottom() {
-    const conversationList = document.getElementById('conversationList');
-    if (conversationList) {
-        conversationList.scrollTop = conversationList.scrollHeight;
-    }
+    setTimeout(() => {
+        // Find the scrollable container. In this design, it seems the .sidepanel-page or body is the scroller
+        // We'll try scrolling the active page or the body.
+        window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: 'smooth'
+        });
+
+        // Let's also try scrolling the 'container' or 'page' itself if they handle overflow.
+        // It looks like 'document.documentElement.scrollTop' is safer for horizontal wrappers.
+        document.documentElement.scrollTop = document.documentElement.scrollHeight;
+    }, 50);
 }
 
 
