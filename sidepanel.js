@@ -847,7 +847,7 @@ const ToolRegistry = {
 };
 
 // NEW FUNCTION: Unified Agent Stream Loop
-async function runAgentStreamLoop(config, messages, conversationKey) {
+async function runAgentStreamLoop(config, messages, conversationKey, recursionDepth = 0) {
     setInterfaceLoading(true);
     let currentMessages = [...messages];
 
@@ -1078,20 +1078,31 @@ async function runAgentStreamLoop(config, messages, conversationKey) {
             scrollToBottom();
 
             // [新增] 等待使用者決策
-            const userDecision = await new Promise((resolve) => {
-                approveBtn.onclick = () => {
-                    confirmationDiv.style.opacity = "0.5";
-                    approveBtn.disabled = true;
-                    denyBtn.disabled = true;
-                    resolve(true);
-                };
-                denyBtn.onclick = () => {
-                    confirmationDiv.style.opacity = "0.5";
-                    approveBtn.disabled = true;
-                    denyBtn.disabled = true;
-                    resolve(false);
-                };
-            });
+            let userDecision = false;
+
+            if (recursionDepth === 0) {
+                console.log("[Agent] 首次工具呼叫，自動允許執行。");
+                confirmationDiv.style.opacity = "0.5";
+                approveBtn.disabled = true;
+                denyBtn.disabled = true;
+                approveBtn.textContent = '自動允許 (首次)';
+                userDecision = true;
+            } else {
+                userDecision = await new Promise((resolve) => {
+                    approveBtn.onclick = () => {
+                        confirmationDiv.style.opacity = "0.5";
+                        approveBtn.disabled = true;
+                        denyBtn.disabled = true;
+                        resolve(true);
+                    };
+                    denyBtn.onclick = () => {
+                        confirmationDiv.style.opacity = "0.5";
+                        approveBtn.disabled = true;
+                        denyBtn.disabled = true;
+                        resolve(false);
+                    };
+                });
+            }
 
             if (userDecision) {
                 for (const toolCall of validToolCalls) {
@@ -1135,7 +1146,7 @@ async function runAgentStreamLoop(config, messages, conversationKey) {
                 console.log("[Agent] 工具執行完畢，停頓 2 秒以避免 API 速率限制 (Rate Limit)，進入下一輪迴圈...");
                 // 新增延遲，避免免費 API (如 Groq, Cerebras) 觸發 429 Too Many Requests
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                return await runAgentStreamLoop(config, currentMessages, conversationKey);
+                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
             } else {
                 console.log("[Agent] 使用者拒絕執行工具。");
                 const declinedDiv = document.createElement('div');
