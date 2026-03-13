@@ -1050,10 +1050,11 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             const btnContainer = document.createElement('div');
             btnContainer.style.padding = "0 10px 10px 10px";
             btnContainer.style.display = "flex";
+            btnContainer.style.flexWrap = "wrap";
             btnContainer.style.gap = "10px";
 
             const approveBtn = document.createElement('button');
-            approveBtn.textContent = '允許 (Approve)';
+            approveBtn.textContent = '允許執行 (Approve)';
             approveBtn.style.backgroundColor = "#4CAF50";
             approveBtn.style.color = "white";
             approveBtn.style.border = "none";
@@ -1061,8 +1062,17 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             approveBtn.style.cursor = "pointer";
             approveBtn.style.borderRadius = "4px";
 
+            const stopBtn = document.createElement('button');
+            stopBtn.textContent = '到此為止 (Stop & Answer)';
+            stopBtn.style.backgroundColor = "#ff9800";
+            stopBtn.style.color = "white";
+            stopBtn.style.border = "none";
+            stopBtn.style.padding = "6px 12px";
+            stopBtn.style.cursor = "pointer";
+            stopBtn.style.borderRadius = "4px";
+
             const denyBtn = document.createElement('button');
-            denyBtn.textContent = '拒絕 (Deny)';
+            denyBtn.textContent = '拒絕執行 (Deny)';
             denyBtn.style.backgroundColor = "#f44336";
             denyBtn.style.color = "white";
             denyBtn.style.border = "none";
@@ -1071,6 +1081,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             denyBtn.style.borderRadius = "4px";
 
             btnContainer.appendChild(approveBtn);
+            btnContainer.appendChild(stopBtn);
             btnContainer.appendChild(denyBtn);
             confirmationDiv.appendChild(confSummary);
             confirmationDiv.appendChild(btnContainer);
@@ -1078,33 +1089,43 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             scrollToBottom();
 
             // [新增] 等待使用者決策
-            let userDecision = false;
+            let userDecision = 'approve';
 
             if (recursionDepth === 0) {
                 console.log("[Agent] 首次工具呼叫，自動允許執行。");
                 confirmationDiv.style.opacity = "0.5";
                 approveBtn.disabled = true;
+                stopBtn.disabled = true;
                 denyBtn.disabled = true;
                 approveBtn.textContent = '自動允許 (首次)';
-                userDecision = true;
+                userDecision = 'approve';
             } else {
                 userDecision = await new Promise((resolve) => {
                     approveBtn.onclick = () => {
                         confirmationDiv.style.opacity = "0.5";
                         approveBtn.disabled = true;
+                        stopBtn.disabled = true;
                         denyBtn.disabled = true;
-                        resolve(true);
+                        resolve('approve');
+                    };
+                    stopBtn.onclick = () => {
+                        confirmationDiv.style.opacity = "0.5";
+                        approveBtn.disabled = true;
+                        stopBtn.disabled = true;
+                        denyBtn.disabled = true;
+                        resolve('stop');
                     };
                     denyBtn.onclick = () => {
                         confirmationDiv.style.opacity = "0.5";
                         approveBtn.disabled = true;
+                        stopBtn.disabled = true;
                         denyBtn.disabled = true;
-                        resolve(false);
+                        resolve('deny');
                     };
                 });
             }
 
-            if (userDecision) {
+            if (userDecision === 'approve') {
                 for (const toolCall of validToolCalls) {
                     const toolName = toolCall.function.name;
                     const toolArgsString = toolCall.function.arguments || "{}";
@@ -1147,19 +1168,44 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 // 新增延遲，避免免費 API (如 Groq, Cerebras) 觸發 429 Too Many Requests
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
+            } else if (userDecision === 'stop') {
+                console.log("[Agent] 使用者要求停止並回答。");
+                const stoppedDiv = document.createElement('div');
+                stoppedDiv.className = 'conversation-item assistant-message';
+                stoppedDiv.innerHTML = '<div class="conversation-content" style="color:#ff9800;"><i>(使用者認為資訊已足夠，終止後續工具執行，正在生成最終回覆...)</i></div>';
+                conversationList.appendChild(stoppedDiv);
+                scrollToBottom();
+
+                for (const toolCall of validToolCalls) {
+                    currentMessages.push({
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        name: toolCall.function.name,
+                        content: JSON.stringify({ status: "user_stopped", message: "系統提示: 使用者認為目前的資訊已經足夠，或提早中止了此工具的執行。請勿再呼叫任何工具，直接根據你目前已知的上下文來總結並回答使用者的問題。" })
+                    });
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
             } else {
                 console.log("[Agent] 使用者拒絕執行工具。");
                 const declinedDiv = document.createElement('div');
                 declinedDiv.className = 'conversation-item assistant-message';
-                declinedDiv.innerHTML = '<div class="conversation-content" style="color:#d9534f;"><i>(工具執行已被使用者拒絕，中止當前回圈)</i></div>';
+                declinedDiv.innerHTML = '<div class="conversation-content" style="color:#f44336;"><i>(工具執行已被使用者拒絕，正在回報中斷狀態...)</i></div>';
                 conversationList.appendChild(declinedDiv);
                 scrollToBottom();
 
-                // 拒絕後直接結束生成，保存目前為止的對話
-                await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
-                await addConversation(conversationKey, { role: 'assistant', content: `[系統通知] Agent 工具執行已被您拒絕。`, isThinking: false });
-                loadSelectedConfig();
-                return;
+                for (const toolCall of validToolCalls) {
+                    currentMessages.push({
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        name: toolCall.function.name,
+                        content: JSON.stringify({ status: "user_aborted", error_code: 403, message: "嚴重警告: 使用者已明確拒絕授權此動作（例如執行JS或其他危險操作）。你絕對不可假設動作已完成，也請勿再嘗試呼叫此工具。請向使用者解釋任務因為權限被拒絕而無法繼續。" })
+                    });
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
             }
         } else {
             console.log("[Agent] 最終對話生成完畢。");
