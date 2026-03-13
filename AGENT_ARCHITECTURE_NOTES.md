@@ -1,7 +1,24 @@
-# AGENT ARCHITECTURE NOTES
+# Barbara Agent 架構與安全設計筆記
 
-## Safe Interruption
-- The importance of safe interruption in agent design is crucial for ensuring that agents can be paused or stopped without causing system errors or unintended consequences.
+這份筆記記錄了 Barbara 擴充功能中關於 AI Agent (智慧代理) 的核心架構設計，特別是在處理「人類回圈確認 (Human-in-the-loop)」時的安全性考量。
 
-## Human-in-the-Loop Mechanism
-- Implementing a human-in-the-loop mechanism allows for human oversight in decision-making processes, ensuring accountability and ethical considerations are upheld in agent actions.
+## 核心觀念 (Core Concepts)
+
+### 1. 行動幻覺 (Action Hallucination)
+- **定義**: 當 LLM (大型語言模型) 請求執行某個工具或動作，但該動作被使用者拒絕或因故失敗時，LLM 若未接收到明確的「失敗/拒絕」訊號，可能會在後續的對話中「幻想」該動作已經成功執行，並給出錯誤的回報（例如：「好的，我已經幫您刪除檔案了」，但實際上並未刪除）。
+- **防範方式**: 當工具執行被中斷時，必須向 LLM 回傳具有強烈語氣或結構化錯誤碼 (如 `error_code: 403`, `status: "user_aborted"`) 的系統提示，強迫 LLM 認知到權限被拒絕。
+
+### 2. 安全中斷 (Safe Interruption)
+- **定義**: 在 Agent 自動執行多步決策或連續呼叫工具的思考迴圈 (Recursive Loop) 中，允許使用者隨時介入並安全地停止後續操作，而不會導致程式崩潰或對話邏輯死鎖。
+- **實踐**: 將中斷行為分級。例如，讀取網頁等「找資料」的操作被中斷，不代表任務失敗，而是「資訊已足夠」；但執行 JavaScript 等「改變狀態」的操作被中斷，則必須被視為「任務中止」。
+
+### 3. 優雅降級 (Graceful Degradation)
+- **定義**: 當系統的一部分無法運作或被使用者限制時，系統不應該直接崩潰，而是應該退而求其次，提供有限但仍然有用的服務。
+- **在 Barbara 中的應用**: 若 Agent 在搜集資料的過程中被使用者按下「到此為止 (Stop & Answer)」強制中斷，Agent 應優雅地停止收集新資訊，並利用**目前已經取得的上下文**來回答使用者的問題，而不是直接報錯或中斷對話。
+
+### 4. 人類回圈確認 (Human-in-the-Loop, HITL)
+- **定義**: 在 AI 代理執行具備潛在風險或關鍵決策的操作前，必須暫停並交由人類進行最終的審批 (Approve/Deny)。
+- **實踐**: Barbara 在觸發執行動作等工具前，會在 UI 產生確認按鈕。為了涵蓋不同情境，後續擴充為三按鈕設計：
+  - 🟢 **允許執行 (Approve)**: 正常放行。
+  - 🟠 **到此為止 (Stop & Answer)**: 針對資料搜集類工具，中斷搜集並要求 LLM 根據現有資訊回答 (對應優雅降級)。
+  - 🔴 **拒絕執行 (Deny)**: 針對動作類工具，明確拒絕權限並回報錯誤給 LLM (防止行動幻覺)。
