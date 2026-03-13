@@ -631,10 +631,22 @@ async function executeScriptInActiveTab(code) {
     });
 }
 
+// Helper: escape HTML special characters to prevent XSS in UI descriptions
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // ✨ NEW: Tool Registry (模組化技能庫) ✨
 const ToolRegistry = {
     // 技能 1: 讀網頁
     read_current_webpage: {
+        getDisplayName: () => "📄 讀取當前網頁",
+        getUiDescription: () => "代理想要讀取你目前正在瀏覽的網頁內容（包含標題與內文），以便回答你的問題。",
         schema: {
             type: "function",
             function: {
@@ -659,6 +671,8 @@ const ToolRegistry = {
     },
     // 技能 2: 執行 JavaScript 程式碼
     execute_javascript_on_page: {
+        getDisplayName: () => "⚡ 執行網頁腳本 (動態修改畫面)",
+        getUiDescription: (args) => `代理想要在當前網頁執行一段腳本。這通常用來改變網頁外觀或操作畫面。<br><strong>預計執行的腳本:</strong><br><code style="background-color: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px; word-break: break-all;">${escapeHtml(args.code || '(空)')}</code>`,
         schema: {
             type: "function",
             function: {
@@ -688,6 +702,12 @@ const ToolRegistry = {
     },
     // ✨ 技能 3: 開啟新分頁
     open_new_tab: {
+        getDisplayName: () => "🌐 開啟新分頁",
+        getUiDescription: (args) => {
+            const safeUrl = (args.url && /^https?:\/\//i.test(args.url)) ? args.url : '#';
+            const displayUrl = escapeHtml(args.url || '');
+            return `代理想要為你開啟一個新分頁並前往: <a href="${escapeHtml(safeUrl)}" target="_blank" style="color: #4CAF50;">${displayUrl}</a>`;
+        },
         schema: {
             type: "function",
             function: {
@@ -724,6 +744,8 @@ const ToolRegistry = {
     },
     // ✨ 技能 4: 切換到上一個分頁
     switch_to_previous_tab: {
+        getDisplayName: () => "⏪ 切換回上一個分頁",
+        getUiDescription: () => "代理想要幫你切換回剛剛瀏覽的分頁。",
         schema: {
             type: "function",
             function: {
@@ -763,6 +785,8 @@ const ToolRegistry = {
     },
     // ✨ 技能 5: 切換到特定分頁
     switch_to_tab: {
+        getDisplayName: () => "🔍 切換到特定分頁",
+        getUiDescription: (args) => `代理想要幫你尋找並切換到包含關鍵字「<strong>${escapeHtml(args.keyword)}</strong>」的分頁。`,
         schema: {
             type: "function",
             function: {
