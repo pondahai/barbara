@@ -1042,9 +1042,21 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             // 讓背景色可以適應淺色/深色，這裡使用透明度較高的黃色
             confirmationDiv.style.backgroundColor = "rgba(255, 204, 0, 0.1)";
 
-            const toolNames = validToolCalls.map(tc => tc.function.name).join(", ");
+            let toolsHtml = "";
+            for (const tc of validToolCalls) {
+                const tName = tc.function.name;
+                let tArgs = {};
+                try { tArgs = JSON.parse(tc.function.arguments || "{}"); } catch(e){ /* ignore parse errors, use empty args */ }
+
+                if (ToolRegistry[tName] && ToolRegistry[tName].getDisplayName && ToolRegistry[tName].getUiDescription) {
+                    toolsHtml += `<strong>${ToolRegistry[tName].getDisplayName()}</strong><br>`;
+                    toolsHtml += `${ToolRegistry[tName].getUiDescription(tArgs)}<br><br>`;
+                } else {
+                    toolsHtml += `<strong>⚙️ ${tName}</strong><br><code style="background-color: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px;">${tc.function.arguments}</code><br><br>`;
+                }
+            }
             const confSummary = document.createElement('div');
-            confSummary.innerHTML = `<strong>⚠️ 代理請求執行以下工具:</strong><br><code style="background-color: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px;">${toolNames}</code><br><br>請確認是否允許執行此操作？`;
+            confSummary.innerHTML = `<strong>⚠️ 代理請求執行以下操作:</strong><br><br>${toolsHtml}請確認是否允許執行？`;
             confSummary.style.padding = "10px";
 
             const btnContainer = document.createElement('div');
@@ -1133,7 +1145,11 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
 
                     const stepDiv = document.createElement('div'); stepDiv.className = 'conversation-item assistant-message thinking-process';
                     const stepDetails = document.createElement('details'); stepDetails.open = true;
-                    const stepSummary = document.createElement('summary'); stepSummary.textContent = `⚙️ 正在處理步驟: ${toolName}`;
+                    const stepSummary = document.createElement('summary');
+                    const displayName = (ToolRegistry[toolName] && ToolRegistry[toolName].getDisplayName)
+                        ? ToolRegistry[toolName].getDisplayName()
+                        : toolName;
+                    stepSummary.textContent = `⚙️ 正在處理步驟: ${displayName}`;
                     stepDetails.appendChild(stepSummary);
                     const stepInner = document.createElement('div'); stepInner.className = 'thinking-content-inner';
                     stepInner.textContent = `參數: ${toolArgsString}`;
