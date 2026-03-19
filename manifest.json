@@ -1,4 +1,8 @@
 {
+   "manifest_version": 3,
+   "name": "Barbara: Local AI Assistant",
+   "version": "1.50",
+   "description": "Barbara 是一款 Chrome 擴充工具，依賴LLM API雙語翻譯、文章摘要和聊天功能。",
    "action": {
       "default_icon": {
          "48": "icon.png"
@@ -15,21 +19,17 @@
             "content.js"
          ],
          "matches": [
-            "\u003Call_urls>"
+            "<all_urls>"
          ]
       }
    ],
-   "description": "Barbara 是一款 Chrome 擴充工具，依賴LLM API雙語翻譯、文章摘要和聊天功能。",
    "host_permissions": [
-      "\u003Call_urls>",
+      "<all_urls>",
       "file:///*"
    ],
    "icons": {
       "48": "icon.png"
    },
-   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA03S/O3tMzW05qnhtGFZcv06SgjvFS3R6NCX+qRPTHbX9aQPjQy/ZCW+xGABENf3NQ8yvTy2yQDeT0+ptna3vDeXpQpbYc0MIeTibIpFn07MYHz4hhKPXTjfsRZJN3rZj5xOAJYXL6ghoMBywQU1yh+4yu9N3exdWCYIsyBV/i52obgI7aTR9iblvJCOpge3KTLKnkPB38661u5IdmISVw3kMcDU13wys1NZbGvbT1sPloe8UjcaR5R6KivA6J7QX3C//bEQHdH6eS/Y49xG9mk9McHAdjifJVcD/i64fEHKNDNL6zlw2iO+wJS7bcoqwL87f8VVfOQmQdTLlH9bkTwIDAQAB",
-   "manifest_version": 3,
-   "name": "Barbara: Local AI Assistant",
    "options_ui": {
       "open_in_tab": false,
       "page": "settings.html"
@@ -46,11 +46,10 @@
       "default_path": "sidepanel.html"
    },
    "update_url": "https://clients2.google.com/service/update2/crx",
-   "version": "1.49",
    "web_accessible_resources": [
       {
          "matches": [
-            "\u003Call_urls>"
+            "<all_urls>"
          ],
          "resources": [
             "icon.png",

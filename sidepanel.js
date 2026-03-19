@@ -1250,7 +1250,11 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
         } else {
             console.log("[Agent] 最終對話生成完畢。");
             await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
-            loadSelectedConfig();
+            // loadSelectedConfig(); // REMOVED: 避免回應完後重新載入導致畫面跳回頂部
+            
+            // 跳轉到最新回覆的起始位置
+            const targetElement = tempThinkDetailsDiv ? tempThinkDetailsDiv.parentElement : (tempMainResponseDiv ? tempMainResponseDiv.parentElement : null);
+            scrollToBottom(targetElement); 
         }
 
     } catch (error) {
@@ -1875,19 +1879,20 @@ function addCopyButtonIfCodeExists(container) {
     });
 }
 
-// NEW: Helper to scroll conversation list to bottom
-function scrollToBottom() {
+// NEW: Helper to scroll conversation list to bottom or a specific element
+function scrollToBottom(element = null) {
     setTimeout(() => {
-        // Find the scrollable container. In this design, it seems the .sidepanel-page or body is the scroller
-        // We'll try scrolling the active page or the body.
-        window.scrollTo({
-            top: document.body.scrollHeight,
-            behavior: 'smooth'
-        });
-
-        // Let's also try scrolling the 'container' or 'page' itself if they handle overflow.
-        // It looks like 'document.documentElement.scrollTop' is safer for horizontal wrappers.
-        document.documentElement.scrollTop = document.documentElement.scrollHeight;
+        if (element) {
+            // 如果有指定元素，直接捲動到該元素
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+            // 否則捲動到整個頁面的底部
+            window.scrollTo({
+                top: document.body.scrollHeight,
+                behavior: 'smooth'
+            });
+            document.documentElement.scrollTop = document.documentElement.scrollHeight;
+        }
     }, 50);
 }
 

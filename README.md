@@ -1,6 +1,11 @@
 # barbara
 Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要，並具備主動讀取與改寫網頁的 Agent 能力。  
-  
+
+## 最新更新 (v1.50)
+* **UI 穩定性優化**: 修復了 AI 回應結束時畫面會跳回頂部的問題。現在對話列表不再因重新載入而閃爍。
+* **智慧自動捲動**: AI 回應完成後，畫面會平滑且精確地捲動至新回覆的起始位置，方便您立即閱讀最新內容。
+* **串流體驗改進**: 優化了訊息渲染機制，讓長文本生成過程更加流暢。
+
 ## chrome外掛安裝:  
 https://chromewebstore.google.com/detail/barbara-local-ai-assistan/ccpdgcdldfgcdnfgigmnlimbnojamghi  
 
