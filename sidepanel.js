@@ -974,8 +974,9 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                             currentAccumulatedTextForDOM += beforeThinkText;
                                             if (!tempMainResponseDiv) {
                                                 const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message streaming';
-                                                tempMainResponseDiv = document.createElement('div'); tempMainResponseDiv.className = 'conversation-content';
-                                                itemDiv.appendChild(tempMainResponseDiv);
+                                                const contentDiv = document.createElement('div'); contentDiv.className = 'conversation-content';
+                                                tempMainResponseDiv = contentDiv;
+                                                itemDiv.appendChild(contentDiv);
                                                 conversationList.appendChild(itemDiv);
                                             }
                                             tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
@@ -987,8 +988,9 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                         currentAccumulatedTextForDOM += processableTokenStream;
                                         if (!tempMainResponseDiv) {
                                             const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message streaming';
-                                            tempMainResponseDiv = document.createElement('div'); tempMainResponseDiv.className = 'conversation-content';
-                                            itemDiv.appendChild(tempMainResponseDiv);
+                                            const contentDiv = document.createElement('div'); contentDiv.className = 'conversation-content';
+                                            tempMainResponseDiv = contentDiv;
+                                            itemDiv.appendChild(contentDiv);
                                             conversationList.appendChild(itemDiv);
                                         }
                                         tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
@@ -1002,16 +1004,27 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                             currentAccumulatedTextForDOM += inThinkText;
                                             if (!tempThinkDetailsDiv) {
                                                 const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message thinking-process streaming';
+                                                const contentDiv = document.createElement('div'); contentDiv.className = 'conversation-content';
                                                 tempThinkDetailsDiv = document.createElement('details');
                                                 const summary = document.createElement('summary'); summary.textContent = 'AI 思考中...';
                                                 tempThinkDetailsDiv.appendChild(summary);
                                                 tempThinkContentDiv = document.createElement('div'); tempThinkContentDiv.className = 'thinking-content-inner';
                                                 tempThinkDetailsDiv.appendChild(tempThinkContentDiv);
-                                                itemDiv.appendChild(tempThinkDetailsDiv);
+                                                contentDiv.appendChild(tempThinkDetailsDiv);
+                                                itemDiv.appendChild(contentDiv);
                                                 conversationList.appendChild(itemDiv);
                                                 tempThinkDetailsDiv.open = true;
                                             }
                                             tempThinkContentDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
+                                        }
+                                        // 偵測到結束標籤，移除游標並摺疊
+                                        if (tempThinkContentDiv && tempThinkContentDiv.innerHTML.endsWith("▍")) {
+                                            tempThinkContentDiv.innerHTML = tempThinkContentDiv.innerHTML.slice(0, -1);
+                                        }
+                                        if (tempThinkDetailsDiv) {
+                                            tempThinkDetailsDiv.open = false;
+                                            const summary = tempThinkDetailsDiv.querySelector('summary');
+                                            if (summary) summary.textContent = '顯示/隱藏 AI 思考過程';
                                         }
                                         currentStreamIsThinking = false;
                                         currentAccumulatedTextForDOM = "";
@@ -1020,12 +1033,14 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                         currentAccumulatedTextForDOM += processableTokenStream;
                                         if (!tempThinkDetailsDiv) {
                                             const itemDiv = document.createElement('div'); itemDiv.className = 'conversation-item assistant-message thinking-process streaming';
+                                            const contentDiv = document.createElement('div'); contentDiv.className = 'conversation-content';
                                             tempThinkDetailsDiv = document.createElement('details');
                                             const summary = document.createElement('summary'); summary.textContent = 'AI 思考中...';
                                             tempThinkDetailsDiv.appendChild(summary);
                                             tempThinkContentDiv = document.createElement('div'); tempThinkContentDiv.className = 'thinking-content-inner';
                                             tempThinkDetailsDiv.appendChild(tempThinkContentDiv);
-                                            itemDiv.appendChild(tempThinkDetailsDiv);
+                                            contentDiv.appendChild(tempThinkDetailsDiv);
+                                            itemDiv.appendChild(contentDiv);
                                             conversationList.appendChild(itemDiv);
                                             tempThinkDetailsDiv.open = true;
                                         }
@@ -1163,6 +1178,44 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 });
             }
 
+            // [修正] 決策完成後，將互動對話框置換為動作描述 (包含動作標題)
+            if (confirmationDiv) {
+                let statusText = '';
+                let statusColor = '';
+                let borderColor = '';
+                
+                if (userDecision === 'approve') {
+                    statusText = recursionDepth === 0 ? '✅ 系統已自動授權執行操作' : '✅ 使用者已授權執行操作';
+                    statusColor = 'rgba(76, 175, 80, 0.1)';
+                    borderColor = '#4CAF50';
+                } else if (userDecision === 'stop') {
+                    statusText = '⚠️ 使用者已要求停止執行';
+                    statusColor = 'rgba(255, 152, 0, 0.1)';
+                    borderColor = '#ff9800';
+                } else {
+                    statusText = '❌ 使用者已拒絕執行操作';
+                    statusColor = 'rgba(244, 67, 54, 0.1)';
+                    borderColor = '#f44336';
+                }
+                
+                // 取得所有工具的顯示名稱
+                const toolNames = validToolCalls.map(tc => {
+                    const tName = tc.function.name;
+                    return (ToolRegistry[tName] && ToolRegistry[tName].getDisplayName) 
+                        ? ToolRegistry[tName].getDisplayName() 
+                        : `⚙️ ${tName}`;
+                }).join(', ');
+
+                confirmationDiv.style.backgroundColor = statusColor;
+                confirmationDiv.style.border = `1px solid ${borderColor}`;
+                confirmationDiv.style.opacity = "1";
+                confirmationDiv.innerHTML = `
+                    <div style="padding: 10px; font-size: 0.9em; color: var(--text-color);">
+                        <strong>${statusText}</strong><br>
+                        <span style="opacity: 0.8; font-size: 0.95em;">動作項目: ${toolNames}</span>
+                    </div>`;
+            }
+
             if (userDecision === 'approve') {
                 for (const toolCall of validToolCalls) {
                     const toolName = toolCall.function.name;
@@ -1263,6 +1316,15 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             }
         } else {
             console.log("[Agent] 最終對話生成完畢。");
+
+            // [新增] 搜尋並摺疊所有開啟中的思考區塊
+            const allThinkingBlocks = conversationList.querySelectorAll('.thinking-process details[open]');
+            allThinkingBlocks.forEach(details => {
+                details.open = false;
+                const summary = details.querySelector('summary');
+                if (summary) summary.textContent = '顯示/隱藏 AI 思考過程';
+            });
+
             await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
             // loadSelectedConfig(); // REMOVED: 避免回應完後重新載入導致畫面跳回頂部
             
