@@ -1,4 +1,50 @@
-/* styles.css */
+/* Agent Step Summary Styles */
+.agent-step {
+    background-color: rgba(76, 175, 80, 0.05) !important; /* 淺綠色背景 */
+    border-left: 3px solid #4CAF50 !important;
+    margin: 8px 0 !important;
+    font-size: 0.9em;
+}
+
+.agent-step details {
+    padding: 5px;
+}
+
+.agent-step summary {
+    color: #2e7d32;
+    font-weight: bold;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+}
+
+.agent-step summary::-webkit-details-marker {
+    display: none;
+}
+
+.agent-step summary::before {
+    content: '▶';
+    display: inline-block;
+    margin-right: 8px;
+    transition: transform 0.2s;
+    font-size: 0.8em;
+}
+
+.agent-step details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.step-content-inner {
+    margin-top: 10px;
+    padding: 8px;
+    background-color: rgba(0, 0, 0, 0.03);
+    border-radius: 4px;
+    border: 1px dashed #ccc;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: monospace;
+}
 #chrome-extension-toolbar {
   /* justify-content: center;	 */
     /* display: inline-block; */

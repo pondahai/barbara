@@ -355,20 +355,21 @@ function loadConversations(config) {
             if (conversation.role === 'user') div.classList.add('user-message');
             if (conversation.role === 'assistant') div.classList.add('assistant-message');
             if (conversation.isThinking) div.classList.add('thinking-process');
+            if (conversation.isStep) div.classList.add('agent-step'); // NEW: Style for agent steps
 
             const contentDiv = document.createElement('div');
             contentDiv.className = 'conversation-content';
 
-            if (conversation.isThinking) {
+            if (conversation.isThinking || conversation.isStep) { // MODIFIED: Handle steps as details too
                 const details = document.createElement('details');
                 const summary = document.createElement('summary');
-                summary.textContent = '顯示/隱藏 AI 思考過程';
+                summary.textContent = conversation.isStep ? '⚙️ 查看代理執行步驟' : '顯示/隱藏 AI 思考過程';
                 details.appendChild(summary);
-                const thinkingContentInnerDiv = document.createElement('div');
-                thinkingContentInnerDiv.className = 'thinking-content-inner';
-                thinkingContentInnerDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(conversation.content) : escapeHtml(conversation.content);
-                addCopyButtonIfCodeExists(thinkingContentInnerDiv);
-                details.appendChild(thinkingContentInnerDiv);
+                const innerDiv = document.createElement('div');
+                innerDiv.className = conversation.isStep ? 'step-content-inner' : 'thinking-content-inner';
+                innerDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(conversation.content) : escapeHtml(conversation.content);
+                addCopyButtonIfCodeExists(innerDiv);
+                details.appendChild(innerDiv);
                 contentDiv.appendChild(details);
             } else {
                 contentDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(conversation.content) : escapeHtml(conversation.content);
@@ -408,13 +409,14 @@ async function copySingleConversationContent(key, index) {
 }
 
 
-// MODIFIED FUNCTION to handle 'isThinking' property when adding to storage
-async function addConversation(key, messageObject) { // messageObject can now have {role, content, isThinking}
+// MODIFIED FUNCTION to handle 'isThinking' and 'isStep' property when adding to storage
+async function addConversation(key, messageObject) { // messageObject can now have {role, content, isThinking, isStep}
     const conversations = await getConversations(key);
     const newConversationEntry = {
         role: messageObject.role,
         content: messageObject.content,
         isThinking: messageObject.isThinking || false, // Default to false if not provided
+        isStep: messageObject.isStep || false, // NEW: For agent action summaries
         timestamp: new Date().toISOString() // NEW: Add timestamp for potential future use
     };
     conversations.push(newConversationEntry);
@@ -1196,6 +1198,18 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
 
                     stepInner.textContent += `\n\n[執行結果]\n${resultString}`;
 
+                    // NEW: Persistent Action Summary
+                    const summaryContent = `**執行工具:** ${displayName}\n**參數:** \`${toolArgsString}\`\n**結果摘要:** ${resultString.substring(0, 200)}${resultString.length > 200 ? '...' : ''}`;
+                    const stepSummaryObj = {
+                        role: 'assistant',
+                        content: summaryContent,
+                        isStep: true
+                    };
+                    await addConversation(conversationKey, stepSummaryObj);
+                    
+                    // NEW: Dynamically render the summary immediately in the UI
+                    renderAndAppendConversationItem(stepSummaryObj, true);
+
                     currentMessages.push({
                         role: "tool",
                         tool_call_id: toolCall.id,
@@ -1290,7 +1304,7 @@ async function sendMessage() {
 
     const conversationsHistory = await getConversations(conversationKey);
     const messagesForAPI = conversationsHistory
-        .filter(conv => !conv.isThinking)
+        .filter(conv => !conv.isThinking && !conv.isStep) // MODIFIED: Filter out steps
         .map(conv => ({ role: conv.role, content: conv.content }));
 
     try {
