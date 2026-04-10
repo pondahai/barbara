@@ -653,12 +653,7 @@ const ToolRegistry = {
             type: "function",
             function: {
                 name: "read_current_webpage",
-                description: "當使用者要求摘要、總結、翻譯當前網頁，或詢問了需要看網頁內容（例如『這篇文章』、『這個網頁寫什麼』）才能回答的問題時，呼叫此工具。",
-                parameters: {
-                    type: "object",
-                    properties: {},
-                    required: []
-                }
+                description: "當使用者要求摘要、總結、翻譯當前網頁，或詢問了需要看網頁內容（例如『這篇文章』、『這個網頁寫什麼』）才能回答的問題時，呼叫此工具。"
             }
         },
         execute: async (args) => {
@@ -752,12 +747,7 @@ const ToolRegistry = {
             type: "function",
             function: {
                 name: "switch_to_previous_tab",
-                description: "當使用者要求回到上一個分頁、切換回剛剛的分頁時，呼叫此工具。",
-                parameters: {
-                    type: "object",
-                    properties: {},
-                    required: []
-                }
+                description: "當使用者要求回到上一個分頁、切換回剛剛的分頁時，呼叫此工具。"
             }
         },
         execute: async (args) => {
@@ -880,7 +870,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
     if (currentMessages.length > 0 && currentMessages[0].role !== 'system') {
         currentMessages.unshift({
             role: 'system',
-            content: 'You are a helpful AI assistant. You have access to tools and can use them to fulfill the user prompt.'
+            content: 'You are a helpful AI assistant. You have access to various tools (functions). If the user asks you to perform an action that requires a tool (such as reading the current webpage, executing javascript, or opening a new tab), YOU MUST USE THE PROVIDED TOOL. Do not simply describe that you need to use a tool, but actually output the proper JSON function call.'
         });
     }
 
@@ -906,6 +896,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
         };
         if (availableTools.length > 0) {
             payload.tools = availableTools;
+            payload.tool_choice = "auto";
         }
 
         const response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
@@ -967,7 +958,14 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                             let processableTokenStream = contentTokens;
                             while (processableTokenStream.length > 0) {
                                 if (!currentStreamIsThinking) {
-                                    const thinkStartIndex = processableTokenStream.indexOf('<think>');
+                                    let thinkStartIndex = processableTokenStream.indexOf('<think>');
+                                    let thinkStartLen = 7;
+                                    const gemmaStart = processableTokenStream.indexOf('<|channel>thought');
+                                    if (gemmaStart !== -1 && (thinkStartIndex === -1 || gemmaStart < thinkStartIndex)) {
+                                        thinkStartIndex = gemmaStart;
+                                        thinkStartLen = processableTokenStream.startsWith('\n', gemmaStart + 17) ? 18 : 17;
+                                    }
+
                                     if (thinkStartIndex !== -1) {
                                         const beforeThinkText = processableTokenStream.substring(0, thinkStartIndex);
                                         if (beforeThinkText) {
@@ -983,7 +981,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                         }
                                         currentStreamIsThinking = true;
                                         currentAccumulatedTextForDOM = "";
-                                        processableTokenStream = processableTokenStream.substring(thinkStartIndex + '<think>'.length);
+                                        processableTokenStream = processableTokenStream.substring(thinkStartIndex + thinkStartLen);
                                     } else {
                                         currentAccumulatedTextForDOM += processableTokenStream;
                                         if (!tempMainResponseDiv) {
@@ -997,7 +995,14 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                         processableTokenStream = "";
                                     }
                                 } else {
-                                    const thinkEndIndex = processableTokenStream.indexOf('</think>');
+                                    let thinkEndIndex = processableTokenStream.indexOf('</think>');
+                                    let thinkEndLen = 8;
+                                    const gemmaEnd = processableTokenStream.indexOf('<channel|>');
+                                    if (gemmaEnd !== -1 && (thinkEndIndex === -1 || gemmaEnd < thinkEndIndex)) {
+                                        thinkEndIndex = gemmaEnd;
+                                        thinkEndLen = 10;
+                                    }
+
                                     if (thinkEndIndex !== -1) {
                                         const inThinkText = processableTokenStream.substring(0, thinkEndIndex);
                                         if (inThinkText) {
@@ -1028,7 +1033,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                         }
                                         currentStreamIsThinking = false;
                                         currentAccumulatedTextForDOM = "";
-                                        processableTokenStream = processableTokenStream.substring(thinkEndIndex + '</think>'.length);
+                                        processableTokenStream = processableTokenStream.substring(thinkEndIndex + thinkEndLen);
                                     } else {
                                         currentAccumulatedTextForDOM += processableTokenStream;
                                         if (!tempThinkDetailsDiv) {
@@ -1382,7 +1387,7 @@ async function sendMessage() {
 
 // NEW FUNCTION to parse the final accumulated response and store parts
 async function parseAndStoreFinalAssistantResponse(finalFullResponse, conversationKey) {
-    const thinkTagRegex = /(?:<think>([\s\S]*?)<\/think>)/; // Non-global for iterative splitting
+    const thinkTagRegex = /(?:<think>|<\|channel>thought\n?)([\s\S]*?)(?:<\/think>|<channel\|>)/; // Non-global for iterative splitting
     let remainingText = finalFullResponse;
 
     if (remainingText.trim() === "") return; // Nothing to store
