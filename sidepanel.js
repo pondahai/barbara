@@ -961,9 +961,14 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                     let thinkStartIndex = processableTokenStream.indexOf('<think>');
                                     let thinkStartLen = 7;
                                     const gemmaStart = processableTokenStream.indexOf('<|channel>thought');
+                                    const altStart = processableTokenStream.indexOf('<thought>');
                                     if (gemmaStart !== -1 && (thinkStartIndex === -1 || gemmaStart < thinkStartIndex)) {
                                         thinkStartIndex = gemmaStart;
                                         thinkStartLen = processableTokenStream.startsWith('\n', gemmaStart + 17) ? 18 : 17;
+                                    }
+                                    if (altStart !== -1 && (thinkStartIndex === -1 || altStart < thinkStartIndex)) {
+                                        thinkStartIndex = altStart;
+                                        thinkStartLen = 9;
                                     }
 
                                     if (thinkStartIndex !== -1) {
@@ -998,8 +1003,13 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                     let thinkEndIndex = processableTokenStream.indexOf('</think>');
                                     let thinkEndLen = 8;
                                     const gemmaEnd = processableTokenStream.indexOf('<channel|>');
+                                    const altEnd = processableTokenStream.indexOf('</thought>');
                                     if (gemmaEnd !== -1 && (thinkEndIndex === -1 || gemmaEnd < thinkEndIndex)) {
                                         thinkEndIndex = gemmaEnd;
+                                        thinkEndLen = 10;
+                                    }
+                                    if (altEnd !== -1 && (thinkEndIndex === -1 || altEnd < thinkEndIndex)) {
+                                        thinkEndIndex = altEnd;
                                         thinkEndLen = 10;
                                     }
 
@@ -1075,10 +1085,8 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             let extractedToolName = null;
             let extractedArgs = "{}";
             
-            // 去除思考標籤內的文字，避免誤判
+            // [修正] 為了支援 Gemma 4 (將呼叫意圖寫在思考過程中)，我們不再去除思考標籤，而是直接掃描全文
             let textToAnalyze = accumulatedResponse;
-            const thinkRegex = /(?:<think>|<\|channel>thought\n?)([\s\S]*?)(?:<\/think>|<channel\|>)/g;
-            textToAnalyze = textToAnalyze.replace(thinkRegex, "");
 
             // 模式 1: Gemma 2 常用引導語 "Therefore, I should call [tool_name]"
             const callPattern1 = /Therefore,\s*I\s*should\s*call\s*`?([a-zA-Z_0-9]+)`?/i;
@@ -1460,7 +1468,7 @@ async function sendMessage() {
 
 // NEW FUNCTION to parse the final accumulated response and store parts
 async function parseAndStoreFinalAssistantResponse(finalFullResponse, conversationKey) {
-    const thinkTagRegex = /(?:<think>|<\|channel>thought\n?)([\s\S]*?)(?:<\/think>|<channel\|>)/; // Non-global for iterative splitting
+    const thinkTagRegex = /(?:<think>|<\|channel>thought\n?|<thought>)([\s\S]*?)(?:<\/think>|<channel\|>|<\/thought>)/; // Non-global for iterative splitting
     let remainingText = finalFullResponse;
 
     if (remainingText.trim() === "") return; // Nothing to store
