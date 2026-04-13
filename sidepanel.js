@@ -1429,7 +1429,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 });
                 currentMessages.push({
                     role: "user",
-                    content: "系統提示: 你剛剛只輸出了思考過程，但沒有實際呼叫任何工具或給予最終回答。請根據你的思考，現在立刻採取行動（呼叫工具）或是直接回答使用者的問題。"
+                    content: "系統提示: 你剛剛輸出了包含多個步驟的思考過程，但沒有實際呼叫工具。請根據你的思考計畫，**現在立刻執行你的「下一個步驟」**。\n請一次只執行一個步驟。如果你決定呼叫工具，請嚴格且僅輸出 JSON 格式，例如：\n```json\n{\n  \"name\": \"工具名稱\",\n  \"arguments\": {\"參數名\": \"參數值\"}\n}\n```\n請不要再輸出任何 `<thought>` 思考過程，直接給我最終結果或這一步的工具呼叫指令。"
                 });
 
                 // 新增一條警告訊息在畫面上
