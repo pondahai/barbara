@@ -1401,6 +1401,56 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
             }
         } else {
+            // [新增] 檢查是否模型「只有思考，沒有回答」，如果是，強迫它繼續
+            const thinkRegexGlobal = /(?:<think>|<\|channel>thought\n?|<thought>)([\s\S]*?)(?:<\/think>|<channel\|>|<\/thought>)/g;
+            const textWithoutThoughts = accumulatedResponse.replace(thinkRegexGlobal, "").trim();
+            // 重置正則表達式的 lastIndex，否則 test() 可能會失敗
+            thinkRegexGlobal.lastIndex = 0; 
+            const hasThoughts = thinkRegexGlobal.test(accumulatedResponse);
+
+            if (hasThoughts && textWithoutThoughts === "" && recursionDepth < 3) {
+                console.log("[Agent] 發現模型僅輸出思考過程而中斷，啟動強制接續遞迴...");
+                
+                // 關閉目前畫面上的思考摺疊面板
+                const allThinkingBlocks = conversationList.querySelectorAll('.thinking-process details[open]');
+                allThinkingBlocks.forEach(details => {
+                    details.open = false;
+                    const summary = details.querySelector('summary');
+                    if (summary) summary.textContent = '顯示/隱藏 AI 思考過程';
+                });
+
+                // 儲存這回合的思考紀錄
+                await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
+                
+                // 把它的思考塞回歷史對話，並發送系統強制指令
+                currentMessages.push({
+                    role: "assistant",
+                    content: accumulatedResponse
+                });
+                currentMessages.push({
+                    role: "user",
+                    content: "系統提示: 你剛剛只輸出了思考過程，但沒有實際呼叫任何工具或給予最終回答。請根據你的思考，現在立刻採取行動（呼叫工具）或是直接回答使用者的問題。"
+                });
+
+                // 新增一條警告訊息在畫面上
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'conversation-item assistant-message';
+                warningDiv.innerHTML = '<div class="conversation-content" style="color:#ff9800; font-size:0.9em;"><i>(代理僅完成思考，系統已自動要求其繼續執行後續動作...)</i></div>';
+                conversationList.appendChild(warningDiv);
+                scrollToBottom();
+
+                // 停頓 2 秒避免速率限制
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // 清理當前變數狀態以準備進入遞迴
+                accumulatedResponse = '';
+                streamingDOMs.main = null;
+                streamingDOMs.think = null;
+                currentStreamIsThinking = false;
+                
+                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
+            }
+
             console.log("[Agent] 最終對話生成完畢。");
 
             // [新增] 搜尋並摺疊所有開啟中的思考區塊
