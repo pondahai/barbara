@@ -1068,7 +1068,80 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             tempMainResponseDiv.innerHTML = tempMainResponseDiv.innerHTML.slice(0, -1);
         }
 
-        const validToolCalls = responseToolCalls.filter(tc => tc !== null && tc !== undefined);
+        let validToolCalls = responseToolCalls.filter(tc => tc !== null && tc !== undefined);
+
+        // [新增] 文字備援解析器 (Text Fallback Parser) 給 Gemma 等不會正確觸發 tool_calls 的模型
+        if (validToolCalls.length === 0 && accumulatedResponse) {
+            let extractedToolName = null;
+            let extractedArgs = "{}";
+            
+            // 去除思考標籤內的文字，避免誤判
+            let textToAnalyze = accumulatedResponse;
+            const thinkRegex = /(?:<think>|<\|channel>thought\n?)([\s\S]*?)(?:<\/think>|<channel\|>)/g;
+            textToAnalyze = textToAnalyze.replace(thinkRegex, "");
+
+            // 模式 1: Gemma 2 常用引導語 "Therefore, I should call [tool_name]"
+            const callPattern1 = /Therefore,\s*I\s*should\s*call\s*`?([a-zA-Z_0-9]+)`?/i;
+            const match1 = textToAnalyze.match(callPattern1);
+            
+            // 模式 2: Markdown JSON 區塊
+            const callPattern2 = /```json\s*(\{[\s\S]*?"name"\s*:\s*"([a-zA-Z_0-9]+)"[\s\S]*?\})\s*```/;
+            const match2 = textToAnalyze.match(callPattern2);
+            
+            // 模式 3: 特殊的 Gemma/Llama 呼叫標籤 `<|tool_call>call:func{...}<tool_call|>`
+            const callPattern3 = /(?:<\|tool_call>|<tool_call>)\s*call:([a-zA-Z_0-9]+)\{([\s\S]*?)\}/;
+            const match3 = textToAnalyze.match(callPattern3);
+            
+            if (match3 && ToolRegistry[match3[1]]) {
+                 extractedToolName = match3[1];
+                 extractedArgs = "{" + match3[2] + "}";
+            } else if (match2 && ToolRegistry[match2[2]]) {
+                 extractedToolName = match2[2];
+                 try {
+                     const parsedObj = JSON.parse(match2[1]);
+                     if (parsedObj.parameters) extractedArgs = JSON.stringify(parsedObj.parameters);
+                     else if (parsedObj.arguments) extractedArgs = JSON.stringify(parsedObj.arguments);
+                 } catch(e) {}
+            } else if (match1 && ToolRegistry[match1[1]]) {
+                 extractedToolName = match1[1];
+                 const jsonMatch = textToAnalyze.match(/\{[\s\S]*?\}/);
+                 if (jsonMatch) {
+                      try {
+                          JSON.parse(jsonMatch[0]);
+                          extractedArgs = jsonMatch[0];
+                      } catch(e){}
+                 }
+            } else {
+                 // 模式 4: 暴力掃描所有註冊工具的名稱是否被直接當作指令提及
+                 for (const tName of Object.keys(ToolRegistry)) {
+                     const actionRegex = new RegExp(`(?:call|use|execute|run)\\s+(?:the\\s+)?(?:tool\\s+)?(?:function\\s+)?\`?${tName}\`?`, 'i');
+                     if (actionRegex.test(textToAnalyze) || new RegExp(`^\\s*${tName}\\s*$`, 'm').test(textToAnalyze)) {
+                         extractedToolName = tName;
+                         const jsonMatch = textToAnalyze.match(/\{[\s\S]*?\}/);
+                         if (jsonMatch) {
+                              try {
+                                  JSON.parse(jsonMatch[0]);
+                                  extractedArgs = jsonMatch[0];
+                              } catch(e){}
+                         }
+                         break;
+                     }
+                 }
+            }
+
+            if (extractedToolName) {
+                console.log(`[Fallback Parser] 成功攔截到模型在文字中嘗試呼叫工具: ${extractedToolName}`);
+                validToolCalls.push({
+                    id: "call_" + Math.random().toString(36).substring(2, 9),
+                    type: "function",
+                    function: {
+                        name: extractedToolName,
+                        arguments: extractedArgs
+                    }
+                });
+            }
+        }
+
         if (validToolCalls.length > 0) {
             console.log("[Agent] AI 要求呼叫工具數量:", validToolCalls.length);
 
