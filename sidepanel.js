@@ -1138,15 +1138,29 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             }
 
             if (extractedToolName) {
-                console.log(`[Fallback Parser] 成功攔截到模型在文字中嘗試呼叫工具: ${extractedToolName}`);
-                validToolCalls.push({
-                    id: "call_" + Math.random().toString(36).substring(2, 9),
-                    type: "function",
-                    function: {
-                        name: extractedToolName,
-                        arguments: extractedArgs
-                    }
-                });
+                // [修正] 檢查該工具是否需要參數
+                const toolSchema = ToolRegistry[extractedToolName].schema.function;
+                const requiresArgs = toolSchema.parameters && toolSchema.parameters.required && toolSchema.parameters.required.length > 0;
+                
+                // 解析擷取到的參數
+                let parsedArgs = {};
+                try { parsedArgs = JSON.parse(extractedArgs); } catch(e) {}
+                const isArgsEmpty = Object.keys(parsedArgs).length === 0;
+
+                // 如果需要參數但我們擷取到的是空物件 (通常代表模型只講了名字沒給 JSON)
+                if (requiresArgs && isArgsEmpty) {
+                    console.log(`[Fallback Parser] 攔截到工具 ${extractedToolName}，但缺乏必要參數，放棄攔截，交由遞迴提示處理。`);
+                } else {
+                    console.log(`[Fallback Parser] 成功攔截到模型在文字中嘗試呼叫工具: ${extractedToolName}`);
+                    validToolCalls.push({
+                        id: "call_" + Math.random().toString(36).substring(2, 9),
+                        type: "function",
+                        function: {
+                            name: extractedToolName,
+                            arguments: extractedArgs
+                        }
+                    });
+                }
             }
         }
 
