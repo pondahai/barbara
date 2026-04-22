@@ -1,7 +1,7 @@
 # barbara
 Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要，並具備主動讀取與改寫網頁的 Agent 能力。  
 
-## 最新更新 (v1.60)
+## 最新更新 (v1.61)
 * **Gemma 4 ReAct 範式支援**: 針對最新 **Gemma 4** 模型優化了 ReAct 推理結構，並支援其特有的 `<|channel>thought` 思考標籤，顯著提升了本地模型執行工具調用 (Tool Calling) 的成功率與邏輯嚴密性。
 * **推理模型支持 (Reasoning Support)**: 完美解析並呈現 `<think>` (DeepSeek) 與 `<|channel>thought` (Gemma 4) 標籤。現在您可以實時查看不同模型的完整思考過程。
 * **智慧代理系統 (Active AI Agent)**: 正式引入具備 `read_current_webpage` 與 `execute_javascript_on_page` 等能力的 Agent 循環。
