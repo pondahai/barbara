@@ -1,10 +1,14 @@
 # barbara
 Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要，並具備主動讀取與改寫網頁的 Agent 能力。  
 
-## 最新更新 (v1.50)
-* **UI 穩定性優化**: 修復了 AI 回應結束時畫面會跳回頂部的問題。現在對話列表不再因重新載入而閃爍。
-* **智慧自動捲動**: AI 回應完成後，畫面會平滑且精確地捲動至新回覆的起始位置，方便您立即閱讀最新內容。
-* **串流體驗改進**: 優化了訊息渲染機制，讓長文本生成過程更加流暢。
+## 最新更新 (v1.60)
+* **Gemma 4 ReAct 範式支援**: 針對最新 **Gemma 4** 模型優化了 ReAct 推理結構，並支援其特有的 `<|channel>thought` 思考標籤，顯著提升了本地模型執行工具調用 (Tool Calling) 的成功率與邏輯嚴密性。
+* **推理模型支持 (Reasoning Support)**: 完美解析並呈現 `<think>` (DeepSeek) 與 `<|channel>thought` (Gemma 4) 標籤。現在您可以實時查看不同模型的完整思考過程。
+* **智慧代理系統 (Active AI Agent)**: 正式引入具備 `read_current_webpage` 與 `execute_javascript_on_page` 等能力的 Agent 循環。
+* **UI/UX 全面強化**:
+    * **配置管理優化**: 改進了多組 API 配置的保存與切換機制，支持從伺服器動態獲取模型列表。
+    * **精準捲動體驗**: 修正了 AI 回應結束時的自動捲動邏輯，確保畫面平滑對齊至最新回覆的起始位置。
+    * **穩定性提升**: 優化了串流訊息渲染與 DOM 更新機制，減少長文本生成時的閃爍。
 
 ## chrome外掛安裝:  
 https://chromewebstore.google.com/detail/barbara-local-ai-assistan/ccpdgcdldfgcdnfgigmnlimbnojamghi  
@@ -16,6 +20,8 @@ Barbara 是一款強大且直觀的 Chrome 擴充功能，專為提升網頁瀏�
 
 ## 主要功能:
 
+* **推理思考顯示**: 支援顯示 DeepSeek (`<think>`) 與 Gemma 4 (`<|channel>thought`) 等推理型模型的內心思維過程，讓 AI 的邏輯決策透明化。
+* **Gemma 4 ReAct 引擎**: 深度優化 ReAct 推理循環，讓最新的 Gemma 4 等本地模型也能穩定地進行複雜的任務規劃與工具執行。
 * **雙向翻譯**: 無論是中譯英或英譯中，Barbara 能夠快速且準確地翻譯網頁內容，支持多種語言的即時翻譯。
 * **文章摘要**: 從長篇文章中快速提取核心信息，幫助您節省時間並快速掌握重點。
 * **智慧代理 (AI Agent)**: 內建技能庫 (ToolRegistry)，AI 能主動判斷需求，抓取當下閱讀的網頁全文進行分析，或根據您的指示自動生成並注入 JavaScript 程式碼以動態修改網頁畫面。
@@ -37,7 +43,7 @@ Barbara 是一款強大且直觀的 Chrome 擴充功能，專為提升網頁瀏�
 * 安全可控: 內建操作攔截機制，防止 AI 代理暴衝或執行惡意程式碼。
 
 *** 注意事項:
-Barbara 本身並不包含任何語言模型或數據，使用這些功能需用戶自行下載並設置相關工具（如 LMStudio 或 llama.cpp）及相應的模型參數檔。請務必注意，在安裝 Barbara 後，您需要另外安裝和配置這些外部資源，才能完全體驗到所有功能。
+Barbara 本身並不包含任何語言模型或數據，使用這些功能需用戶自行下載並設置相關工具（如 LMStudio 或 llama.cpp）及相應的模型參數檔。請務必注意，在安裝 Barbara 後，您需要另外安裝 and 配置這些外部資源，才能完全體驗到所有功能。
 
 ## 適用對象:
 
