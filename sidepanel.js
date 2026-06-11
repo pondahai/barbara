@@ -981,6 +981,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                                 tempMainResponseDiv = contentDiv;
                                                 itemDiv.appendChild(contentDiv);
                                                 conversationList.appendChild(itemDiv);
+                                                scrollToBottom(itemDiv); // 自動聚焦到回覆區塊起點
                                             }
                                             tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
                                         }
@@ -995,6 +996,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                             tempMainResponseDiv = contentDiv;
                                             itemDiv.appendChild(contentDiv);
                                             conversationList.appendChild(itemDiv);
+                                            scrollToBottom(itemDiv); // 自動聚焦到回覆區塊起點
                                         }
                                         tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
                                         processableTokenStream = "";
@@ -1040,6 +1042,11 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                             tempThinkDetailsDiv.open = false;
                                             const summary = tempThinkDetailsDiv.querySelector('summary');
                                             if (summary) summary.textContent = '顯示/隱藏 AI 思考過程';
+                                            
+                                            // [新增] 完成思考時，如果已經有主回覆區塊，聚焦到它
+                                            if (tempMainResponseDiv) {
+                                                scrollToBottom(tempMainResponseDiv.parentElement);
+                                            }
                                         }
                                         currentStreamIsThinking = false;
                                         currentAccumulatedTextForDOM = "";
@@ -1239,7 +1246,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             confirmationDiv.appendChild(confSummary);
             confirmationDiv.appendChild(btnContainer);
             conversationList.appendChild(confirmationDiv);
-            scrollToBottom();
+            scrollToBottom(confirmationDiv); // 自動聚焦到授權對話框
 
             // [新增] 等待使用者決策
             let userDecision = 'approve';
