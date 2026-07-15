@@ -54,7 +54,7 @@ function Get-CwsCredentials {
         }
     }
     if (Test-Path $CredFile) {
-        $j = Get-Content $CredFile -Raw | ConvertFrom-Json
+        $j = Get-Content $CredFile -Raw -Encoding UTF8 | ConvertFrom-Json
         return @{
             client_id     = $j.client_id
             client_secret = $j.client_secret
@@ -106,7 +106,8 @@ foreach ($f in $Files) {
 }
 
 # ---- 2. 讀版本、打包 zip ----
-$manifest = Get-Content (Join-Path $Root 'manifest.json') -Raw | ConvertFrom-Json
+# -Encoding UTF8 必須明寫：PS 5.1 對無 BOM 檔案預設用 ANSI 解讀，中文 description 會破壞 JSON
+$manifest = Get-Content (Join-Path $Root 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $manifest.version
 $zipPath = Join-Path $Root "barbara-v$version.zip"
 Write-Host "[2/4] 打包 v$version -> $zipPath ..." -ForegroundColor Cyan
