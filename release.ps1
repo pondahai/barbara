@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Barbara 一鍵發佈腳本：同步檔案到 dist → 打包 zip → 上傳 Chrome Web Store →（可選）送審發佈。
 
