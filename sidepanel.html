@@ -79,7 +79,13 @@
             border-radius: 50%;
             z-index: 1;
         }
-        .conversation-item button.copy-button { 
+        /* NEW: 回答期間鎖住刪除鈕與換頁鈕 */
+        body.answer-locked .conversation-item button.delete-button,
+        body.answer-locked .nav-button {
+            pointer-events: none;
+            opacity: 0.35;
+        }
+        .conversation-item button.copy-button {
             background: none; 
             border: none; 
             color: #007bff; 

@@ -131,6 +131,52 @@ function changePage(direction) {
     }
 }
 
+// === NEW: 智慧型跟隨捲動 (Smart Follow Scroll) ===
+// 串流回答時自動跟隨捲動到最新內容；使用者手動往上捲時暫停跟隨，
+// 捲回接近底部時自動恢復跟隨。
+let autoFollowScroll = true;          // 是否處於「跟隨」狀態
+let userScrollIntent = false;         // 使用者是否正在用滑鼠/觸控操作捲動
+const FOLLOW_BOTTOM_THRESHOLD = 100;  // 距離底部多少 px 內視為「在底部」
+
+function isNearBottom() {
+    const el = document.scrollingElement || document.documentElement;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_BOTTOM_THRESHOLD;
+}
+
+// 只在「跟隨」狀態下才捲到底（串流期間使用，instant 避免和快速更新打架）
+function smartFollowScroll() {
+    if (!autoFollowScroll) return;
+    const el = document.scrollingElement || document.documentElement;
+    el.scrollTop = el.scrollHeight;
+}
+
+// 滾輪往上 = 使用者想看前文，立即暫停跟隨
+window.addEventListener('wheel', (event) => {
+    if (event.deltaY < 0) autoFollowScroll = false;
+}, { passive: true });
+
+// 觸控 / 拖曳捲軸期間，若離開底部就暫停跟隨
+window.addEventListener('touchstart', () => { userScrollIntent = true; }, { passive: true });
+window.addEventListener('touchend', () => { userScrollIntent = false; }, { passive: true });
+window.addEventListener('mousedown', () => { userScrollIntent = true; });
+window.addEventListener('mouseup', () => { userScrollIntent = false; });
+
+window.addEventListener('keydown', (event) => {
+    const activeTag = document.activeElement ? document.activeElement.tagName : '';
+    if (activeTag === 'TEXTAREA' || activeTag === 'INPUT') return;
+    if (['PageUp', 'ArrowUp', 'Home'].includes(event.key)) autoFollowScroll = false;
+});
+
+// 捲回接近底部時恢復跟隨；使用者操作中離開底部則暫停
+window.addEventListener('scroll', () => {
+    if (isNearBottom()) {
+        autoFollowScroll = true;
+    } else if (userScrollIntent) {
+        autoFollowScroll = false;
+    }
+}, { passive: true });
+// === END 智慧型跟隨捲動 ===
+
 let selectedConfigIndex = 0; // Keep this if it's used by other logic not shown
 let selectedConfig = null;
 let currentConversationItem = null; // This will be an object {parentItem, contentContainer} for streaming
@@ -644,6 +690,21 @@ function escapeHtml(str) {
 }
 
 // ✨ NEW: Tool Registry (模組化技能庫) ✨
+// === NEW: 本次對話工具授權（以工具為單位的 first-use 授權）===
+// 每個工具在一次對話中「第一次」被呼叫時都會詢問；使用者按「本次對話都允許」後，
+// 該工具在本對話的後續輪次自動放行。存於記憶體（重開側邊欄即重置，屬安全預設）。
+const conversationToolGrants = new Map(); // conversationKey -> Set<toolName>
+// 硬上限：每連續自動放行 N 輪，強制跳出一次人工確認（避免小模型空轉刷迴圈）
+const AUTO_APPROVE_CHECKPOINT_ROUNDS = 8;
+
+function getGrantedTools(conversationKey) {
+    if (!conversationToolGrants.has(conversationKey)) {
+        conversationToolGrants.set(conversationKey, new Set());
+    }
+    return conversationToolGrants.get(conversationKey);
+}
+// === END 本次對話工具授權 ===
+
 const ToolRegistry = {
     // 技能 1: 讀網頁
     read_current_webpage: {
@@ -862,9 +923,130 @@ const ToolRegistry = {
     // 未來可以在這裡新增技能 3...
 };
 
+// NEW: 括號配對式 JSON 物件抽取。
+// 取代先前的非貪婪 regex /\{[\s\S]*?\}/（遇巢狀物件會在第一個 } 截斷），
+// 正確處理巢狀大括號與字串值內的大括號/跳脫字元。回傳第一個可成功 JSON.parse 的物件字串。
+function extractFirstJsonObject(text) {
+    let i = 0;
+    while (i < text.length) {
+        const start = text.indexOf('{', i);
+        if (start === -1) return null;
+        let depth = 0, inString = false, escaped = false, end = -1;
+        for (let j = start; j < text.length; j++) {
+            const ch = text[j];
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (ch === '\\') escaped = true;
+                else if (ch === '"') inString = false;
+            } else {
+                if (ch === '"') inString = true;
+                else if (ch === '{') depth++;
+                else if (ch === '}') {
+                    depth--;
+                    if (depth === 0) { end = j; break; }
+                }
+            }
+        }
+        if (end === -1) return null; // 括號不平衡（可能是被截斷的輸出）
+        const candidate = text.slice(start, end + 1);
+        try {
+            JSON.parse(candidate);
+            return candidate;
+        } catch (e) {
+            i = start + 1; // 這段不是合法 JSON，從下一個 { 繼續找
+        }
+    }
+    return null;
+}
+
+// === NEW: 第二階段「反芻抽取」(Two-Phase Extraction, v1) ===
+// 第一階段讓模型自由推理輸出（不套格式）；若未觸發原生 tool_calls，串流結束後由
+// 同一顆模型對自己的輸出做一次非串流的「純抽取」呼叫，把文字中的工具呼叫意圖轉為
+// 結構化 JSON。設計依據見 TWO_PHASE_EXTRACTION_NOTES.md。
+// 重試上限 2 次，徹底失敗則降級到 regex 文字備援解析器。
+const EXTRACTION_MAX_ATTEMPTS = 2;
+
+// 便宜的前置過濾：全文完全沒提到任何已註冊工具名，就不花一次 API 呼叫去反芻
+function textMentionsAnyTool(text) {
+    return Object.keys(ToolRegistry).some(name => text.includes(name));
+}
+
+// 驗證抽取結果（schema 驗證放 harness，不信任模型輸出）
+// 回傳: {noTool:true} | tool_call 物件 | null(驗證失敗)
+function validateExtractedToolCall(parsed) {
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.name === null) return { noTool: true };
+    if (typeof parsed.name !== 'string' || !ToolRegistry[parsed.name]) return null;
+    const args = (parsed.arguments && typeof parsed.arguments === 'object') ? parsed.arguments : {};
+    const fnSchema = ToolRegistry[parsed.name].schema.function;
+    const required = (fnSchema.parameters && fnSchema.parameters.required) || [];
+    for (const key of required) {
+        if (args[key] === undefined || args[key] === null || args[key] === '') return null;
+    }
+    return {
+        id: "call_" + Math.random().toString(36).substring(2, 9),
+        type: "function",
+        function: { name: parsed.name, arguments: JSON.stringify(args) }
+    };
+}
+
+async function extractToolCallViaModel(config, phase1Text) {
+    const toolList = Object.values(ToolRegistry).map(t => {
+        const fn = t.schema.function;
+        const paramNames = fn.parameters ? Object.keys(fn.parameters.properties || {}).join(', ') : '';
+        return `- ${fn.name}${paramNames ? ` (參數: ${paramNames})` : ' (無參數)'}`;
+    }).join('\n');
+
+    const extractionMessages = [
+        {
+            role: 'system',
+            content: '你是一個純抽取器。閱讀使用者提供的 AI 助理輸出文本，判斷其中是否嘗試呼叫工具。只從文本中抽取，不得新增、改寫或自行推理。只輸出一個 JSON 物件，不要輸出任何其他文字。'
+        },
+        {
+            role: 'user',
+            content: `可用工具:\n${toolList}\n\n助理輸出文本:\n"""\n${phase1Text}\n"""\n\n若文本中嘗試呼叫上述工具，輸出 {"name": "工具名", "arguments": {參數物件}}；參數值必須來自文本本身，不得自行編造。若文本沒有嘗試呼叫任何工具，輸出 {"name": null}。`
+        }
+    ];
+
+    for (let attempt = 1; attempt <= EXTRACTION_MAX_ATTEMPTS; attempt++) {
+        try {
+            console.log(`[Extractor] 第二階段反芻抽取，嘗試 ${attempt}/${EXTRACTION_MAX_ATTEMPTS}...`);
+            const response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${config.apiKey}`,
+                    'ngrok-skip-browser-warning': 'true'
+                },
+                body: JSON.stringify({
+                    model: config.modelId,
+                    messages: extractionMessages,
+                    stream: false,
+                    temperature: 0,
+                    max_tokens: 1024
+                })
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const rawText = (data.choices && data.choices[0] && data.choices[0].message)
+                ? (data.choices[0].message.content || '') : '';
+            const jsonStr = extractFirstJsonObject(rawText);
+            if (!jsonStr) throw new Error('回應中沒有可解析的 JSON');
+            const result = validateExtractedToolCall(JSON.parse(jsonStr));
+            if (result) return result; // {noTool:true} 或 tool_call 物件
+            throw new Error('抽取結果未通過 schema 驗證');
+        } catch (error) {
+            console.warn(`[Extractor] 抽取失敗 (${attempt}/${EXTRACTION_MAX_ATTEMPTS}): ${error.message}`);
+        }
+    }
+    return null; // 徹底失敗 → 呼叫端降級到 regex 備援解析器
+}
+// === END 第二階段反芻抽取 ===
+
 // NEW FUNCTION: Unified Agent Stream Loop
 async function runAgentStreamLoop(config, messages, conversationKey, recursionDepth = 0) {
     setInterfaceLoading(true);
+    if (recursionDepth === 0) autoFollowScroll = true; // 新回答開始時重置為跟隨模式
     let currentMessages = [...messages];
 
     if (currentMessages.length > 0 && currentMessages[0].role !== 'system') {
@@ -981,7 +1163,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                                 tempMainResponseDiv = contentDiv;
                                                 itemDiv.appendChild(contentDiv);
                                                 conversationList.appendChild(itemDiv);
-                                                scrollToBottom(itemDiv); // 自動聚焦到回覆區塊起點
+                                                if (autoFollowScroll) scrollToBottom(itemDiv); // 自動聚焦到回覆區塊起點
                                             }
                                             tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
                                         }
@@ -996,7 +1178,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                             tempMainResponseDiv = contentDiv;
                                             itemDiv.appendChild(contentDiv);
                                             conversationList.appendChild(itemDiv);
-                                            scrollToBottom(itemDiv); // 自動聚焦到回覆區塊起點
+                                            if (autoFollowScroll) scrollToBottom(itemDiv); // 自動聚焦到回覆區塊起點
                                         }
                                         tempMainResponseDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(currentAccumulatedTextForDOM + "▍") : escapeHtml(currentAccumulatedTextForDOM + "▍");
                                         processableTokenStream = "";
@@ -1043,8 +1225,8 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                                             const summary = tempThinkDetailsDiv.querySelector('summary');
                                             if (summary) summary.textContent = '顯示/隱藏 AI 思考過程';
                                             
-                                            // [新增] 完成思考時，如果已經有主回覆區塊，聚焦到它
-                                            if (tempMainResponseDiv) {
+                                            // [新增] 完成思考時，如果已經有主回覆區塊，聚焦到它（僅在跟隨模式下）
+                                            if (tempMainResponseDiv && autoFollowScroll) {
                                                 scrollToBottom(tempMainResponseDiv.parentElement);
                                             }
                                         }
@@ -1076,7 +1258,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                     }
                 }
             }
-            scrollToBottom();
+            smartFollowScroll(); // MODIFIED: 智慧型跟隨捲動（使用者往上捲時暫停）
         }
 
         if (currentStreamIsThinking && tempThinkContentDiv && tempThinkContentDiv.innerHTML.endsWith("▍")) {
@@ -1087,8 +1269,24 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
 
         let validToolCalls = responseToolCalls.filter(tc => tc !== null && tc !== undefined);
 
-        // [新增] 文字備援解析器 (Text Fallback Parser) 給 Gemma 等不會正確觸發 tool_calls 的模型
-        if (validToolCalls.length === 0 && accumulatedResponse) {
+        // NEW: 第二階段反芻抽取（優先路徑）— 見 TWO_PHASE_EXTRACTION_NOTES.md
+        let extractorSaidNoTool = false;
+        if (validToolCalls.length === 0 && accumulatedResponse && textMentionsAnyTool(accumulatedResponse)) {
+            const extracted = await extractToolCallViaModel(config, accumulatedResponse);
+            if (extracted) {
+                if (extracted.noTool) {
+                    // 抽取器明確判定沒有工具呼叫意圖 → 信任它，跳過 regex（避免 regex 假陽性）
+                    extractorSaidNoTool = true;
+                    console.log("[Extractor] 判定文本中沒有工具呼叫意圖。");
+                } else {
+                    console.log(`[Extractor] 成功抽取工具呼叫: ${extracted.function.name}`);
+                    validToolCalls.push(extracted);
+                }
+            }
+        }
+
+        // [新增] 文字備援解析器 (Text Fallback Parser) — 反芻抽取失敗時的降級路徑
+        if (validToolCalls.length === 0 && !extractorSaidNoTool && accumulatedResponse) {
             let extractedToolName = null;
             let extractedArgs = "{}";
             
@@ -1119,26 +1317,18 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                  } catch(e) {}
             } else if (match1 && ToolRegistry[match1[1]]) {
                  extractedToolName = match1[1];
-                 const jsonMatch = textToAnalyze.match(/\{[\s\S]*?\}/);
-                 if (jsonMatch) {
-                      try {
-                          JSON.parse(jsonMatch[0]);
-                          extractedArgs = jsonMatch[0];
-                      } catch(e){}
-                 }
+                 // MODIFIED: 改用括號配對抽取，修正巢狀 JSON 被非貪婪 regex 截斷的問題
+                 const jsonStr = extractFirstJsonObject(textToAnalyze);
+                 if (jsonStr) extractedArgs = jsonStr;
             } else {
                  // 模式 4: 暴力掃描所有註冊工具的名稱是否被直接當作指令提及
                  for (const tName of Object.keys(ToolRegistry)) {
                      const actionRegex = new RegExp(`(?:call|use|execute|run)\\s+(?:the\\s+)?(?:tool\\s+)?(?:function\\s+)?\`?${tName}\`?`, 'i');
                      if (actionRegex.test(textToAnalyze) || new RegExp(`^\\s*${tName}\\s*$`, 'm').test(textToAnalyze)) {
                          extractedToolName = tName;
-                         const jsonMatch = textToAnalyze.match(/\{[\s\S]*?\}/);
-                         if (jsonMatch) {
-                              try {
-                                  JSON.parse(jsonMatch[0]);
-                                  extractedArgs = jsonMatch[0];
-                              } catch(e){}
-                         }
+                         // MODIFIED: 改用括號配對抽取，修正巢狀 JSON 被非貪婪 regex 截斷的問題
+                         const jsonStr = extractFirstJsonObject(textToAnalyze);
+                         if (jsonStr) extractedArgs = jsonStr;
                          break;
                      }
                  }
@@ -1246,42 +1436,75 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             confirmationDiv.appendChild(confSummary);
             confirmationDiv.appendChild(btnContainer);
             conversationList.appendChild(confirmationDiv);
-            scrollToBottom(confirmationDiv); // 自動聚焦到授權對話框
+
+            // NEW: 「本次對話都允許」判斷（以工具為單位的 first-use 授權）
+            const grantedTools = getGrantedTools(conversationKey);
+            const batchToolNames = [...new Set(validToolCalls.map(tc => tc.function.name))];
+            const allGranted = batchToolNames.every(name => grantedTools.has(name));
+            // 硬上限檢查點：連續自動放行 N 輪後，強制人工確認一次
+            const checkpointReached = recursionDepth > 0 && recursionDepth % AUTO_APPROVE_CHECKPOINT_ROUNDS === 0;
+
+            // 需要人工決策時強制聚焦到授權對話框；自動放行則只是紀錄，走智慧跟隨不打擾使用者
+            if (allGranted && !checkpointReached) {
+                smartFollowScroll();
+            } else {
+                scrollToBottom(confirmationDiv); // 自動聚焦到授權對話框
+            }
 
             // [新增] 等待使用者決策
             let userDecision = 'approve';
+            let autoApprovedByGrant = false; // 本輪是否依授權清單自動放行
+            let grantedThisRound = false;    // 本輪使用者是否按下「本次對話都允許」
 
-            if (recursionDepth === 0) {
-                console.log("[Agent] 首次工具呼叫，自動允許執行。");
+            if (allGranted && !checkpointReached) {
+                console.log("[Agent] 依「本次對話都允許」授權自動放行:", batchToolNames.join(', '));
+                autoApprovedByGrant = true;
                 confirmationDiv.style.opacity = "0.5";
                 approveBtn.disabled = true;
                 stopBtn.disabled = true;
                 denyBtn.disabled = true;
-                approveBtn.textContent = '自動允許 (首次)';
+                approveBtn.textContent = '自動允許 (已授權)';
                 userDecision = 'approve';
             } else {
+                // 檢查點提示：授權齊全但已連續自動執行多輪，強制回來確認一次
+                if (checkpointReached && allGranted) {
+                    const checkpointNote = document.createElement('div');
+                    checkpointNote.style.padding = "0 10px 8px 10px";
+                    checkpointNote.style.fontSize = "0.85em";
+                    checkpointNote.style.color = "#ff9800";
+                    checkpointNote.textContent = `⚠️ 已連續自動執行 ${AUTO_APPROVE_CHECKPOINT_ROUNDS} 輪，請確認是否繼續。`;
+                    confirmationDiv.insertBefore(checkpointNote, btnContainer);
+                }
+
+                // NEW: 「本次對話都允許」按鈕（授權本輪出現的工具，本對話後續不再詢問）
+                const alwaysBtn = document.createElement('button');
+                alwaysBtn.textContent = '本次對話都允許 (Always)';
+                alwaysBtn.style.backgroundColor = "#2196F3";
+                alwaysBtn.style.color = "white";
+                alwaysBtn.style.border = "none";
+                alwaysBtn.style.padding = "6px 12px";
+                alwaysBtn.style.cursor = "pointer";
+                alwaysBtn.style.borderRadius = "4px";
+                btnContainer.insertBefore(alwaysBtn, stopBtn);
+
                 userDecision = await new Promise((resolve) => {
-                    approveBtn.onclick = () => {
+                    const lockDialog = () => {
                         confirmationDiv.style.opacity = "0.5";
                         approveBtn.disabled = true;
+                        alwaysBtn.disabled = true;
                         stopBtn.disabled = true;
                         denyBtn.disabled = true;
+                    };
+                    approveBtn.onclick = () => { lockDialog(); resolve('approve'); };
+                    alwaysBtn.onclick = () => {
+                        // 將本輪出現的工具加入本次對話的授權清單
+                        batchToolNames.forEach(name => grantedTools.add(name));
+                        grantedThisRound = true;
+                        lockDialog();
                         resolve('approve');
                     };
-                    stopBtn.onclick = () => {
-                        confirmationDiv.style.opacity = "0.5";
-                        approveBtn.disabled = true;
-                        stopBtn.disabled = true;
-                        denyBtn.disabled = true;
-                        resolve('stop');
-                    };
-                    denyBtn.onclick = () => {
-                        confirmationDiv.style.opacity = "0.5";
-                        approveBtn.disabled = true;
-                        stopBtn.disabled = true;
-                        denyBtn.disabled = true;
-                        resolve('deny');
-                    };
+                    stopBtn.onclick = () => { lockDialog(); resolve('stop'); };
+                    denyBtn.onclick = () => { lockDialog(); resolve('deny'); };
                 });
             }
 
@@ -1292,7 +1515,9 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 let borderColor = '';
                 
                 if (userDecision === 'approve') {
-                    statusText = recursionDepth === 0 ? '✅ 系統已自動授權執行操作' : '✅ 使用者已授權執行操作';
+                    statusText = autoApprovedByGrant ? '✅ 已依「本次對話都允許」自動放行'
+                        : grantedThisRound ? '✅ 使用者已授權（本次對話此類動作不再詢問）'
+                        : '✅ 使用者已授權執行操作';
                     statusColor = 'rgba(76, 175, 80, 0.1)';
                     borderColor = '#4CAF50';
                 } else if (userDecision === 'stop') {
@@ -1316,10 +1541,15 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 confirmationDiv.style.backgroundColor = statusColor;
                 confirmationDiv.style.border = `1px solid ${borderColor}`;
                 confirmationDiv.style.opacity = "1";
+                // NEW: 自動放行時保留完整動作紀錄（含執行腳本的程式碼），事後可審
+                const autoDetailHtml = autoApprovedByGrant
+                    ? `<details style="margin-top: 6px;"><summary style="cursor: pointer; font-size: 0.9em;">動作詳情（完整紀錄）</summary><div style="padding: 6px 0; font-size: 0.9em;">${toolsHtml}</div></details>`
+                    : '';
                 confirmationDiv.innerHTML = `
                     <div style="padding: 10px; font-size: 0.9em; color: var(--text-color);">
                         <strong>${statusText}</strong><br>
                         <span style="opacity: 0.8; font-size: 0.95em;">動作項目: ${toolNames}</span>
+                        ${autoDetailHtml}
                     </div>`;
             }
 
@@ -1342,7 +1572,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                     stepDetails.appendChild(stepInner);
                     stepDiv.appendChild(stepDetails);
                     conversationList.appendChild(stepDiv);
-                    scrollToBottom();
+                    smartFollowScroll();
 
                     let toolArgs = {};
                     try { toolArgs = JSON.parse(toolArgsString); } catch (e) { }
@@ -1388,7 +1618,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 stoppedDiv.className = 'conversation-item assistant-message';
                 stoppedDiv.innerHTML = '<div class="conversation-content" style="color:#ff9800;"><i>(使用者認為資訊已足夠，終止後續工具執行，正在生成最終回覆...)</i></div>';
                 conversationList.appendChild(stoppedDiv);
-                scrollToBottom();
+                smartFollowScroll();
 
                 for (const toolCall of validToolCalls) {
                     currentMessages.push({
@@ -1407,7 +1637,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 declinedDiv.className = 'conversation-item assistant-message';
                 declinedDiv.innerHTML = '<div class="conversation-content" style="color:#f44336;"><i>(工具執行已被使用者拒絕，正在回報中斷狀態...)</i></div>';
                 conversationList.appendChild(declinedDiv);
-                scrollToBottom();
+                smartFollowScroll();
 
                 for (const toolCall of validToolCalls) {
                     currentMessages.push({
@@ -1458,7 +1688,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 warningDiv.className = 'conversation-item assistant-message';
                 warningDiv.innerHTML = '<div class="conversation-content" style="color:#ff9800; font-size:0.9em;"><i>(代理僅完成思考，系統已自動要求其繼續執行後續動作...)</i></div>';
                 conversationList.appendChild(warningDiv);
-                scrollToBottom();
+                smartFollowScroll();
 
                 // 停頓 2 秒避免速率限制
                 await new Promise(resolve => setTimeout(resolve, 2000));
@@ -1485,9 +1715,9 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
             // loadSelectedConfig(); // REMOVED: 避免回應完後重新載入導致畫面跳回頂部
             
-            // 跳轉到最新回覆的起始位置
+            // 跳轉到最新回覆的起始位置（使用者已手動捲離時不打擾）
             const targetElement = tempThinkDetailsDiv ? tempThinkDetailsDiv.parentElement : (tempMainResponseDiv ? tempMainResponseDiv.parentElement : null);
-            scrollToBottom(targetElement); 
+            if (autoFollowScroll) scrollToBottom(targetElement);
         }
 
     } catch (error) {
@@ -1837,7 +2067,9 @@ function setInterfaceLoading(isLoading) {
         document.getElementById('summaryButton'),
         document.getElementById('translateButton'),
         document.getElementById('configSelect'),
-        document.getElementById('deleteAllConversationsButton')
+        document.getElementById('deleteAllConversationsButton'),
+        document.getElementById('prevButton'),   // NEW: 回答期間鎖住換頁
+        document.getElementById('nextButton')    // NEW: 回答期間鎖住換頁
     ];
     elements.forEach(element => {
         if (element) {
@@ -1845,6 +2077,8 @@ function setInterfaceLoading(isLoading) {
             element.classList.toggle('loading', isLoading);
         }
     });
+    // NEW: 回答期間鎖住對話項目上的刪除鈕（透過 CSS pointer-events）
+    document.body.classList.toggle('answer-locked', isLoading);
     const loadingIndicator = document.getElementById('loadingIndicator');
     if (loadingIndicator) {
         loadingIndicator.classList.toggle('show', isLoading);
