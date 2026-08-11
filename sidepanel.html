@@ -25,7 +25,8 @@
             padding: 20px;
             box-sizing: border-box;
             position: relative;
-            overflow-x: auto; /* 添加 overflow-x 屬性 */
+            overflow-x: hidden; /* 防止橫向捲軸 */
+            max-width: 100vw; /* 確保不超過視窗寬度 */
         }
         .settings-page {
             background-color: #f4f4f4;
@@ -40,7 +41,7 @@
             margin-top: 5px; 
             padding: 5px; 
             width: 100%; 
-            max-width: 300px; 
+            max-width: 100%; 
             border-radius: 5px; 
             border: 1px solid #ccc; 
             box-sizing: border-box;
@@ -60,6 +61,8 @@
             border: 1px solid #ccc; 
             border-radius: 5px;
             position: relative;
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
         .conversation-item:nth-child(even) { background-color: rgba(255, 255, 255, 0.6); }
         .conversation-item button.delete-button { 
@@ -188,6 +191,8 @@
             border-radius: 5px; 
             padding: 5px;
             position: relative;
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
         .config-item button { 
             background: none; 
