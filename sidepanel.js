@@ -705,6 +705,95 @@ function getGrantedTools(conversationKey) {
 }
 // === END 本次對話工具授權 ===
 
+// === 依模型 context 動態調整網頁內文長度 ===
+// 不再使用固定字元數上限，而是先問模型端的 context window，再換算成可用的字元預算。
+const DEFAULT_CONTEXT_TOKENS = 8192;   // 問不到 context 長度時的保守預設值
+const RESERVED_OUTPUT_TOKENS = 2048;   // 保留給模型回覆
+const RESERVED_PROMPT_TOKENS = 2048;   // 保留給 system prompt、工具定義與既有對話
+const MIN_PAGE_TOKENS = 1024;          // 再怎麼小也至少給網頁內文這麼多
+const contextWindowCache = new Map();  // `${apiUrl}-${modelId}` -> tokens
+
+function pickContextLength(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    // 不同後端欄位名稱不一致：LM Studio / vLLM / Ollama / OpenAI-like 都各自有一套
+    const keys = ['loaded_context_length', 'max_context_length', 'context_length',
+                  'max_model_len', 'context_window', 'n_ctx'];
+    for (const key of keys) {
+        const value = obj[key];
+        if (typeof value === 'number' && value > 0) return value;
+    }
+    return null;
+}
+
+async function fetchModelContextWindow(config) {
+    const headers = {
+        'Authorization': `Bearer ${config.apiKey}`,
+        'ngrok-skip-browser-warning': 'true'
+    };
+    // LM Studio 的 /api/v0 端點會直接回報目前載入的 context 長度
+    try {
+        const response = await fetch(`${config.apiUrl}/api/v0/models/${encodeURIComponent(config.modelId)}`, { headers });
+        if (response.ok) {
+            const found = pickContextLength(await response.json());
+            if (found) return found;
+        }
+    } catch (error) {
+        console.warn('[Context] /api/v0/models 查詢失敗，改用 /v1/models:', error.message);
+    }
+    // 退回標準 /v1/models，部分後端會在模型物件上附帶 context 欄位
+    try {
+        const response = await fetch(`${config.apiUrl}/v1/models`, { headers });
+        if (response.ok) {
+            const data = await response.json();
+            const model = (data.data || []).find(m => m && m.id === config.modelId);
+            const found = pickContextLength(model);
+            if (found) return found;
+        }
+    } catch (error) {
+        console.warn('[Context] /v1/models 查詢失敗:', error.message);
+    }
+    return null;
+}
+
+async function getModelContextTokens(config) {
+    if (!config || !config.apiUrl || !config.modelId) return DEFAULT_CONTEXT_TOKENS;
+    const cacheKey = `${config.apiUrl}-${config.modelId}`;
+    if (contextWindowCache.has(cacheKey)) return contextWindowCache.get(cacheKey);
+
+    const found = await fetchModelContextWindow(config);
+    const tokens = found || DEFAULT_CONTEXT_TOKENS;
+    contextWindowCache.set(cacheKey, tokens);
+    console.log(`[Context] ${config.modelId} context window = ${tokens} tokens${found ? '' : ' (預設值，後端未提供)'}`);
+    return tokens;
+}
+
+// 粗估 token 數：CJK 字元約 1 字 1 token，其餘約 4 個字元 1 token。
+function estimateTokens(text) {
+    if (!text) return 0;
+    const cjk = (text.match(/[぀-ヿ㐀-䶿一-鿿가-힣豈-﫿]/g) || []).length;
+    return cjk + Math.ceil((text.length - cjk) / 4);
+}
+
+// 依 token 預算截斷文字，回傳 { text, truncated }
+function truncateToTokenBudget(text, maxTokens) {
+    if (estimateTokens(text) <= maxTokens) return { text, truncated: false };
+    // 用估算比例先切，再逐步收斂到預算內
+    let cut = Math.max(1, Math.floor(text.length * maxTokens / Math.max(1, estimateTokens(text))));
+    let result = text.slice(0, cut);
+    while (cut > 1 && estimateTokens(result) > maxTokens) {
+        cut = Math.floor(cut * 0.9);
+        result = text.slice(0, cut);
+    }
+    return { text: result, truncated: true };
+}
+
+// 網頁內文可用的 token 預算
+async function getPageContentTokenBudget(config) {
+    const contextTokens = await getModelContextTokens(config);
+    return Math.max(MIN_PAGE_TOKENS, contextTokens - RESERVED_OUTPUT_TOKENS - RESERVED_PROMPT_TOKENS);
+}
+// === END 依模型 context 動態調整 ===
+
 const ToolRegistry = {
     // 技能 1: 讀網頁
     read_current_webpage: {
@@ -721,7 +810,10 @@ const ToolRegistry = {
             console.log("[Tool] 正在執行 read_current_webpage...");
             const pageData = await getCurrentPageContext();
             if (pageData && pageData.content) {
-                return `網頁標題: ${pageData.title}\n網頁內文 (截斷至前 15000 字元):\n${pageData.content.substring(0, 15000)}`;
+                const budget = await getPageContentTokenBudget(selectedConfig);
+                const { text, truncated } = truncateToTokenBudget(pageData.content, budget);
+                const note = truncated ? `(內容過長，已依模型 context 上限截斷至約 ${budget} tokens)` : '';
+                return `網頁標題: ${pageData.title}\n網頁內文${note}:\n${text}`;
             } else {
                 return "工具執行失敗，無法讀取網頁內容。";
             }
