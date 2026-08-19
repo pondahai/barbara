@@ -721,7 +721,7 @@ const ToolRegistry = {
             console.log("[Tool] 正在執行 read_current_webpage...");
             const pageData = await getCurrentPageContext();
             if (pageData && pageData.content) {
-                return `網頁標題: ${pageData.title}\n網頁內文 (截斷至前 15000 字元):\n${pageData.content.substring(0, 15000)}`;
+                return `網頁標題: ${pageData.title}\n網頁內文:\n${pageData.content}`;
             } else {
                 return "工具執行失敗，無法讀取網頁內容。";
             }
