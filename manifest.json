@@ -1,7 +1,7 @@
 {
    "manifest_version": 3,
    "name": "Barbara: Local AI Assistant",
-   "version": "1.65",
+   "version": "1.66",
    "description": "Barbara 是一款 Chrome 擴充工具，依賴LLM API雙語翻譯、文章摘要和聊天功能。",
    "action": {
       "default_icon": {
