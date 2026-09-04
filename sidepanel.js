@@ -2486,11 +2486,37 @@ function addCopyButtonIfCodeExists(container) {
 }
 
 // NEW: Helper to scroll conversation list to bottom or a specific element
+// 四個頁面是靠 container 的 translateX 平移切換的，頁 3、頁 4 實際上就躺在畫面
+// 右側 100vw~300vw 的位置。scrollIntoView 會「順便」做水平捲動把元素帶進視野，
+// 結果是整個 body 被往左推、版面偏移、文字被切掉。
+// body 的 overflow-x:hidden 只藏捲軸，擋不住程式化捲動，所以這裡改成只捲垂直軸。
+function resetHorizontalScroll() {
+    // 只碰水平軸。不要用 window.scrollTo(x, y)——它會一併設定垂直位置，
+    // 而設定捲動位置會中斷正在進行的 smooth 捲動，讓自動跳到新回答失效。
+    const doc = document.scrollingElement || document.documentElement;
+    if (doc.scrollLeft !== 0) doc.scrollLeft = 0;
+    if (document.body.scrollLeft !== 0) document.body.scrollLeft = 0;
+    const container = document.getElementById('container');
+    if (container && container.scrollLeft !== 0) container.scrollLeft = 0;
+}
+
+// 保險：任何來源造成的水平捲動都拉回 0（例如按鈕取得焦點時瀏覽器的自動捲動）
+window.addEventListener('scroll', resetHorizontalScroll, { passive: true });
+
 function scrollToBottom(element = null) {
     setTimeout(() => {
         if (element) {
-            // 如果有指定元素，直接捲動到該元素
-            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // 用 scrollIntoView：它會自己找出正確的捲動容器，這件事自己重寫很容易出錯。
+            // 它的副作用是會「順便」做水平捲動（見上方說明），但那個副作用由
+            // resetHorizontalScroll 獨立壓制——那個函式只碰 scrollLeft，
+            // 不會中斷這裡的垂直 smooth 動畫。
+            element.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+            // smooth 捲動是非同步的，水平位移可能在動畫過程中才發生，
+            // 除了 scroll 事件的監聽之外再補幾次保險。
+            resetHorizontalScroll();
+            requestAnimationFrame(resetHorizontalScroll);
+            setTimeout(resetHorizontalScroll, 300);
+            setTimeout(resetHorizontalScroll, 700);
         } else {
             // 否則捲動到整個頁面的底部
             window.scrollTo({
