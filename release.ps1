@@ -34,6 +34,8 @@ $Files = @(
     'content.js',
     'sidepanel.html',
     'sidepanel.js',
+    'sowhat.js',
+    'so-what-prompt.md',
     'settings.html',
     'settings.js',
     'popup/popup.html',

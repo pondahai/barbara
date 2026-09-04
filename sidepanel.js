@@ -64,6 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 translateTextFromContent(request.text);
             } else if (request.action === "factCheckFromContent") {
                 factCheckTextFromContent(request.text);
+            } else if (request.action === "soWhatFromContent") {
+                soWhatFromContent(request.text);
             }
         });
 
@@ -79,6 +81,12 @@ document.addEventListener('DOMContentLoaded', () => {
         await initialLoadAndDisplayConfigs(); // Main function to load configs and then conversations
         updateButtons(); // This depends on currentPage, which is fine
         changePage(1);   // This changes UI, also fine after data load
+        // 包 try/catch：這是附加功能，不能因為它出錯就讓整個側欄初始化失敗
+        try {
+            await soWhatRestoreIfAny(); // 側欄重載後接回未完成的「所以呢？」對話
+        } catch (e) {
+            console.error('[所以呢？] 還原未完成對話失敗:', e);
+        }
         console.log("[DEBUG] Side Panel Initialized.");
     }
 
