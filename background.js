@@ -10,7 +10,20 @@ chrome.runtime.onInstalled.addListener(() => {
         title: "翻譯",
         contexts: ["selection"]
     });
+
+    chrome.contextMenus.create({
+        id: "factCheckContext",
+        title: "真的假的",
+        contexts: ["selection"]
+    });
 });
+
+// 右鍵選單項目 -> 側邊欄動作對照表
+const CONTEXT_MENU_ACTIONS = {
+    summarizeContext: "summarizeFromContent",
+    translateContext: "translateFromContent",
+    factCheckContext: "factCheckFromContent"
+};
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
     chrome.storage.local.get(['currentTabId'], (result) => {
@@ -102,7 +115,7 @@ function processText(info, tab, text) {
 
 function openSidePanelAndSendMessage(info, targetWindowId, targetTabId, text) {
     console.log("[openSidePanel] Checking windowType for targetWindowId:", targetWindowId);
-    const action = info.menuItemId === "summarizeContext" ? "summarizeFromContextMenu" : "translateFromContextMenu";
+    const action = CONTEXT_MENU_ACTIONS[info.menuItemId] || "translateFromContent";
 
     // 1. Verify if the target window is actually a "normal" browser window.
     // PWAs are usually type "app" or "popup", and sidePanel.open silently "succeeds"
@@ -119,9 +132,7 @@ function openSidePanelAndSendMessage(info, targetWindowId, targetTabId, text) {
             chrome.sidePanel.open({ windowId: targetWindowId })
                 .then(() => {
                     console.log("[openSidePanel] Successfully opened sidePanel in targetWindowId:", targetWindowId);
-                    // Map ContextMenu actions to Content actions since sidepanel expects *FromContent
-                    const mappedAction = action === "summarizeFromContextMenu" ? "summarizeFromContent" :
-                        action === "translateFromContextMenu" ? "translateFromContent" : action;
+                    const mappedAction = action;
 
                     setTimeout(() => {
                         console.log("[openSidePanel] Broadcasting message to side panel. Action:", mappedAction);
@@ -154,10 +165,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
 function fallbackToOtherWindowOrPopup(action, text) {
     console.warn("[fallback] PWA context menu clicked. Bypassing other windows due to user gesture limits. Opening popup.");
 
-    // Map ContextMenu actions to Content actions since sidepanel expects *FromContent 
-    // when receiving a direct message for translation/summarization.
-    const mappedAction = action === "summarizeFromContextMenu" ? "summarizeFromContent" :
-        action === "translateFromContextMenu" ? "translateFromContent" : action;
+    const mappedAction = action;
 
     if (fallbackPopupWindowId !== null) {
         // Check if the window is still actually open

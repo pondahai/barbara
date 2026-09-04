@@ -62,6 +62,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 summarizeTextFromContent(request.text);
             } else if (request.action === "translateFromContent") {
                 translateTextFromContent(request.text);
+            } else if (request.action === "factCheckFromContent") {
+                factCheckTextFromContent(request.text);
             }
         });
 
@@ -696,6 +698,16 @@ function escapeHtml(str) {
 const conversationToolGrants = new Map(); // conversationKey -> Set<toolName>
 // 硬上限：每連續自動放行 N 輪，強制跳出一次人工確認（避免小模型空轉刷迴圈）
 const AUTO_APPROVE_CHECKPOINT_ROUNDS = 8;
+
+// 一次授權本對話所有工具（「綠燈通行」）：查核流程需要連續開分頁、讀網頁，
+// 逐輪詢問會打斷查核，因此進入查核前先把所有工具加入本對話授權清單。
+// 仍保留 AUTO_APPROVE_CHECKPOINT_ROUNDS 檢查點，避免小模型無限空轉。
+function grantAllTools(conversationKey) {
+    const granted = getGrantedTools(conversationKey);
+    Object.keys(ToolRegistry).forEach(name => granted.add(name));
+    console.log("[Agent] 已為本次對話開啟所有工具綠燈:", [...granted].join(', '));
+    return granted;
+}
 
 function getGrantedTools(conversationKey) {
     if (!conversationToolGrants.has(conversationKey)) {
@@ -2097,6 +2109,41 @@ async function translateTextFromContent(text) {
     } catch (error) {
         console.error('Error translating text:', error);
         const errorResponseMessage = { role: 'assistant', content: `翻譯錯誤: ${error.message}`, isThinking: false };
+        await addConversation(conversationKey, errorResponseMessage);
+        loadSelectedConfig();
+    }
+}
+
+// NEW: 「真的假的」— 對選取文字做網路查資料查核
+async function factCheckTextFromContent(text) {
+    if (!text) { alert("無資料"); return; }
+    if (!selectedConfig) { alert("請先設定 API 網址和 API 金鑰"); return; }
+
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    // 查核需要連續使用工具（開搜尋分頁、讀網頁），先把所有工具設為綠燈通行
+    grantAllTools(conversationKey);
+
+    const replyLanguage = getLanguageNameForPrompt(navigator.language || 'zh-TW');
+    const messageContent = `請幫我查核以下這段文字的真實性（真的假的）：\n"""\n${text}\n"""\n\n` +
+        `請務必實際上網查資料，不要只憑既有知識回答，步驟如下：\n` +
+        `1. 用 open_new_tab 開啟搜尋結果頁（例如 https://www.google.com/search?q=關鍵字），關鍵字取自上面文字的核心主張。\n` +
+        `2. 用 read_current_webpage 讀取搜尋結果，挑出可信度較高的來源。\n` +
+        `3. 需要時再用 open_new_tab 開啟個別來源並用 read_current_webpage 讀取內容，交叉比對至少兩個來源。\n` +
+        `4. 最後用 ${replyLanguage} 回覆，格式為：\n` +
+        `   - 結論：真的 / 假的 / 部分正確 / 證據不足\n` +
+        `   - 理由：條列說明查到的證據與矛盾之處\n` +
+        `   - 來源：列出你實際讀過的網址\n` +
+        `如果查不到足夠證據，請明說「證據不足」，不要編造來源或內容。`;
+    const userMessage = { role: 'user', content: messageContent };
+
+    await addConversation(conversationKey, userMessage);
+    await updateConversationItem(userMessage);
+
+    try {
+        await runAgentStreamLoop(selectedConfig, [{ role: 'user', content: messageContent }], conversationKey);
+    } catch (error) {
+        console.error('Error fact-checking text:', error);
+        const errorResponseMessage = { role: 'assistant', content: `查核錯誤: ${error.message}`, isThinking: false };
         await addConversation(conversationKey, errorResponseMessage);
         loadSelectedConfig();
     }
