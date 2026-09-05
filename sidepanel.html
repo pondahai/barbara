@@ -423,6 +423,140 @@
             box-sizing: border-box;
             margin-bottom: 6px;
         }
+
+        /* 卡片資料表入口鈕：跟既有的刪除(X)、複製(📋)並排，沿用同一套絕對定位 */
+        .conversation-item button.card-table-button {
+            background: none;
+            border: none;
+            color: #6a4c93;
+            cursor: pointer;
+            font-size: 18px;
+            position: absolute;
+            bottom: -8px;
+            right: 70px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            padding: 0;
+            margin: 0;
+            z-index: 1;
+        }
+        body.answer-locked .conversation-item button.card-table-button {
+            pointer-events: none;
+            opacity: 0.35;
+        }
+        /* 空對話時入口鈕改為置中的一般按鈕，不用絕對定位 */
+        .empty-with-card-button button.card-table-button {
+            position: static;
+            display: inline-flex;
+            margin-top: 10px;
+            font-size: 22px;
+            width: auto;
+            height: auto;
+            background: none;
+            border: none;
+            color: #6a4c93;
+            cursor: pointer;
+        }
+
+        /* 卡片資料表覆蓋層 */
+        .sowhat-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+        .sowhat-card-panel {
+            background: #fff;
+            color: #000;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 100%;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            box-sizing: border-box;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        }
+        .sowhat-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .sowhat-card-list {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .sowhat-card-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 8px 4px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .sowhat-card-row input.sowhat-card-check {
+            width: auto;
+            margin: 2px 0 0 0;
+            flex: none;
+        }
+        .sowhat-card-body { min-width: 0; }
+        .sowhat-card-title {
+            font-weight: bold;
+            word-break: break-word;
+        }
+        .sowhat-card-meta {
+            color: #888;
+            font-size: 0.82em;
+            margin-top: 2px;
+            word-break: break-word;
+        }
+        .sowhat-card-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        /* 「所以呢？」整段對話的容器。收尾後整段搬進 <details> 摺起來：
+           過程還看得到，但不再佔畫面。重開側欄就不會再出現（卡片才是留下來的東西）。 */
+        .sowhat-thread-details {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: rgba(255, 255, 255, 0.6);
+            padding: 8px 10px;
+            margin-bottom: 10px;
+        }
+        .sowhat-thread-details > summary {
+            cursor: pointer;
+            font-weight: bold;
+            color: #6a4c93;
+            word-break: break-word;
+        }
+        /* 摺疊後裡面的訊息框不用再各自畫框，省得層層疊框 */
+        .sowhat-thread-details .conversation-item {
+            border: none;
+            padding: 6px 0;
+            margin-bottom: 0;
+            background: none;
+        }
+        .sowhat-thread-details[open] > summary {
+            margin-bottom: 6px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 6px;
+        }
     </style>
 </head>
 <body>

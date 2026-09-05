@@ -265,16 +265,54 @@ function soWhatRemovePlaceholder() {
     if (placeholder) placeholder.remove();
 }
 
-function soWhatAppendItem(extraClass) {
+// 整段「所以呢？」對話放在同一個容器裡，而不是散成一堆兄弟節點。這讓兩件事變簡單：
+//   1. 收尾後要整段摺疊，只要把內容搬進一個 <details>。
+//   2. loadConversations 重畫清單時（清空 → 從 conversations 重建），這段對話
+//      不在 conversations 裡、會被一起抹掉；有容器就只要把同一個節點接回去，
+//      不用從 uiLog 逐則重建。
+let soWhatThreadEl = null;
+
+function soWhatEnsureThread() {
     const list = soWhatConversationList();
     if (!list) return null;
+    if (!soWhatThreadEl) {
+        soWhatThreadEl = document.createElement('div');
+        soWhatThreadEl.className = 'sowhat-thread';
+    }
+    if (soWhatThreadEl.parentElement !== list) list.appendChild(soWhatThreadEl);
+    return soWhatThreadEl;
+}
+
+// 給 loadConversations 在重畫後呼叫：把這段對話接回清單尾端
+function soWhatReattachThread(list) {
+    if (!soWhatThreadEl || !list) return;
+    list.appendChild(soWhatThreadEl);
+}
+
+// 收尾後整段摺起來：過程看得到，但不再佔畫面
+function soWhatCollapseThread(title) {
+    const thread = soWhatThreadEl;
+    if (!thread || thread.dataset.collapsed === '1') return;
+    const details = document.createElement('details');
+    details.className = 'sowhat-thread-details';
+    const summary = document.createElement('summary');
+    summary.textContent = `所以呢？ — ${title}`;
+    details.appendChild(summary);
+    while (thread.firstChild) details.appendChild(thread.firstChild);
+    thread.appendChild(details);
+    thread.dataset.collapsed = '1';
+}
+
+function soWhatAppendItem(extraClass) {
+    const thread = soWhatEnsureThread();
+    if (!thread) return null;
     soWhatRemovePlaceholder();
     const div = document.createElement('div');
     div.className = 'conversation-item sowhat-item' + (extraClass ? ' ' + extraClass : '');
     const content = document.createElement('div');
     content.className = 'conversation-content';
     div.appendChild(content);
-    list.appendChild(div);
+    thread.appendChild(div);
     if (typeof scrollToBottom === 'function') scrollToBottom(div);
     return content;
 }
@@ -378,7 +416,7 @@ function soWhatRenderAsk(payload, isReplay) {
     let options = Array.isArray(payload.options) ? payload.options.slice() : [];
     // 約束：每一輪都要有出口。模型忘了給就由程式補上。
     if (!options.some(option => option.id === 'done')) {
-        options.push({ id: 'done', label: '夠了，存起來' });
+        options.push({ id: 'done', label: '夠了，直接收尾' });
     }
     soWhatRenderOptions(content, options, true);
 }
@@ -518,6 +556,7 @@ async function soWhatFromContent(text) {
     }
 
     const pageInfo = await soWhatGetActivePageInfo();
+    soWhatThreadEl = null; // 每次新對話都用全新的容器，不要接在上一段後面
     soWhatSession = soWhatNewSession(text, pageInfo.title, pageInfo.url);
     soWhatSession.uiLog.push({ kind: 'intro' });
     await soWhatSaveSession();
@@ -530,7 +569,7 @@ async function soWhatFromContent(text) {
         const message = document.createElement('div');
         message.textContent = '這段東西對你來說是哪一種？';
         content.appendChild(message);
-        soWhatRenderOptions(content, SOWHAT_DIRECTIONS.concat([{ id: 'done', label: '夠了，存起來' }]), false);
+        soWhatRenderOptions(content, SOWHAT_DIRECTIONS.concat([{ id: 'done', label: '夠了，直接收尾' }]), false);
     }
     const firstAsk = { phase: 'ask', message: '這段東西對你來說是哪一種？', options: SOWHAT_DIRECTIONS };
     soWhatSession.uiLog.push({ kind: 'ask', payload: firstAsk });
@@ -577,7 +616,7 @@ async function soWhatHandleChoice(option) {
 
     let userContent;
     if (option.id === 'done') {
-        userContent = '夠了，存起來。請用目前已有的內容直接收尾，回傳 phase: "close"。';
+        userContent = '夠了，不用再問了。請用目前已有的內容直接收尾，回傳 phase: "close"。';
     } else if (option.id === 'more') {
         userContent = '再問我一輪。';
     } else if (option.id === 'retry') {
@@ -660,29 +699,27 @@ async function soWhatRequestTurn() {
 
 // 第一版不做卡片持久化：收尾的那句話寫進現有的對話記錄，這樣重開側欄還看得到。
 // 第二版要做的卡片結構見 so-what-handoff.md 第五節。
+// 收尾只寫進卡片資料表，不自動塞進聊天記錄——要讓模型看到某張卡片時，
+// 再從資料表用「插入對話歷史」明確放進去。這樣卡片不會無限累積在每次發問的
+// 上下文裡，「插入」這個動作也才有意義。
 async function soWhatFinish(payload) {
-    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
-    const lines = [];
-    if (payload && payload.title) lines.push(`**所以呢？ — ${payload.title}**`);
-    if (payload && payload.final_takeaway) lines.push('', payload.final_takeaway);
-    if (soWhatSession && soWhatSession.pageUrl) lines.push('', `來源：${soWhatSession.pageUrl}`);
-    if (payload && Array.isArray(payload.evidence_quotes)) {
-        payload.evidence_quotes.forEach(quote => lines.push('', `> ${quote}`));
-    }
-    if (payload && Array.isArray(payload.open_questions) && payload.open_questions.length > 0) {
-        lines.push('', '待追：');
-        payload.open_questions.forEach(question => lines.push(`- ${question}`));
-    }
+    const card = await soWhatBuildCard(payload, soWhatSession);
+    await soWhatAddCard(card);
 
-    const content = lines.join('\n').trim() || '（這次對話沒有產出結論）';
-    await addConversation(conversationKey, { role: 'assistant', content: content });
+    // 先摺疊，再加提示——提示要留在摺疊區塊外面才看得到
+    soWhatCollapseThread(card.title);
 
     const done = soWhatAppendItem('assistant-message sowhat-saved');
     if (done) {
         const note = document.createElement('div');
         note.className = 'sowhat-note';
-        note.textContent = '已收進對話記錄。';
+        note.textContent = `已存成卡片：${card.title}`;
         done.appendChild(note);
+        const open = document.createElement('button');
+        open.className = 'sowhat-option';
+        open.textContent = '打開卡片資料表';
+        open.onclick = () => soWhatOpenCardTable();
+        done.appendChild(open);
     }
 
     await soWhatClearSession();
@@ -711,6 +748,7 @@ async function soWhatRestoreIfAny() {
     }
 
     soWhatSession = saved;
+    soWhatThreadEl = null;
 
     for (let i = 0; i < saved.uiLog.length; i++) {
         const entry = saved.uiLog[i];
@@ -729,4 +767,239 @@ async function soWhatRestoreIfAny() {
             soWhatRenderRaw(entry.text, !isLast);
         }
     }
+}
+
+
+// ---------------------------------------------------------------------------
+// 卡片資料表
+// ---------------------------------------------------------------------------
+//
+// 結構見 so-what-handoff.md 第五節。文件明確要求：卡片的 id 與 sources 結構
+// 定下來就別再改，其他欄位可以之後再長。所以即使第一版用不到的欄位
+// （thread_id、initial_intent）也先留著位置，不要之後再回頭改結構。
+
+const SOWHAT_CARDS_KEY = 'soWhatCards';
+
+async function soWhatLoadCards() {
+    return new Promise((resolve) => {
+        chrome.storage.local.get({ [SOWHAT_CARDS_KEY]: [] }, (result) => {
+            resolve(result[SOWHAT_CARDS_KEY] || []);
+        });
+    });
+}
+
+async function soWhatSaveCards(cards) {
+    return new Promise((resolve) => {
+        chrome.storage.local.set({ [SOWHAT_CARDS_KEY]: cards }, resolve);
+    });
+}
+
+async function soWhatAddCard(card) {
+    const cards = await soWhatLoadCards();
+    cards.push(card);
+    await soWhatSaveCards(cards);
+    return card;
+}
+
+async function soWhatDeleteCards(ids) {
+    const cards = await soWhatLoadCards();
+    const kept = cards.filter(card => !ids.includes(card.id));
+    await soWhatSaveCards(kept);
+    return cards.length - kept.length;
+}
+
+// card_YYYYMMDD_xxxx
+function soWhatMakeCardId(date) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+    const rand = Array.from(crypto.getRandomValues(new Uint8Array(2)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+    return `card_${stamp}_${rand}`;
+}
+
+// 帶時區的 ISO 字串（new Date().toISOString() 會轉成 UTC，看卡片時容易誤判日期）
+function soWhatLocalIso(date) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const offset = -date.getTimezoneOffset();
+    const sign = offset >= 0 ? '+' : '-';
+    const abs = Math.abs(offset);
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+        `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+        `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+
+// 只雜湊「引用到的證據句」，不要雜湊整頁 HTML——廣告與時間戳每次都不同，
+// 雜湊整頁會天天誤報「來源已變更」。（so-what-handoff.md 第五節）
+async function soWhatHashEvidence(quotes) {
+    if (!Array.isArray(quotes) || quotes.length === 0) return null;
+    const data = new TextEncoder().encode(quotes.join('\n'));
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    const hex = Array.from(new Uint8Array(digest))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+    return `sha256:${hex}`;
+}
+
+async function soWhatBuildCard(payload, session) {
+    const now = new Date();
+    const quotes = (payload && Array.isArray(payload.evidence_quotes)) ? payload.evidence_quotes : [];
+
+    const sources = [];
+    if (session && session.pageUrl) {
+        sources.push({
+            kind: 'webpage',
+            url: session.pageUrl,
+            site_title: session.pageTitle || '',
+            captured_at: soWhatLocalIso(now),
+            evidence_hash: await soWhatHashEvidence(quotes)
+        });
+    }
+    // 無來源的直接提問走同一套模型，sources 只留 kind: self
+    sources.push({ kind: 'self', via: '對話式知識內化' });
+
+    return {
+        id: soWhatMakeCardId(now),
+        type: 'internalization',
+        created_at: soWhatLocalIso(now),
+        title: (payload && payload.title) || '(未命名)',
+        sources: sources,
+        direction: session ? session.direction : null,
+        initial_intent: null,   // 一開始說不出來時為 null；第一版沒有單獨收集這欄
+        final_takeaway: (payload && payload.final_takeaway) || '',
+        cognitive_shift: !!(payload && payload.cognitive_shift),
+        evidence_quotes: quotes,
+        open_questions: (payload && Array.isArray(payload.open_questions)) ? payload.open_questions : [],
+        thread_id: null,        // 訊息本體放另一個 store，第一版不存
+        insight_summary: (payload && payload.insight_summary) || '',
+        tags: (payload && Array.isArray(payload.tags)) ? payload.tags : []
+    };
+}
+
+// 插入對話歷史時的內容：標題 + 結論 + 來源網址
+function soWhatCardToMessage(card) {
+    const lines = [`**${card.title}**`];
+    if (card.final_takeaway) lines.push('', card.final_takeaway);
+    const webpage = (card.sources || []).find(source => source.kind === 'webpage');
+    if (webpage && webpage.url) lines.push('', `來源：${webpage.url}`);
+    return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// 卡片資料表 UI
+// ---------------------------------------------------------------------------
+
+async function soWhatOpenCardTable() {
+    const existing = document.getElementById('soWhatCardOverlay');
+    if (existing) existing.remove();
+
+    const cards = await soWhatLoadCards();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'soWhatCardOverlay';
+    overlay.className = 'sowhat-overlay';
+
+    const panel = document.createElement('div');
+    panel.className = 'sowhat-card-panel';
+
+    const header = document.createElement('div');
+    header.className = 'sowhat-card-header';
+    const heading = document.createElement('strong');
+    heading.textContent = `卡片資料表（${cards.length}）`;
+    const close = document.createElement('button');
+    close.className = 'sowhat-option';
+    close.textContent = '關閉';
+    close.onclick = () => overlay.remove();
+    header.appendChild(heading);
+    header.appendChild(close);
+    panel.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'sowhat-card-list';
+
+    if (cards.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'sowhat-note';
+        empty.textContent = '還沒有卡片。用右鍵選單的「所以呢？」完成一次對話並按「存起來」就會出現在這裡。';
+        list.appendChild(empty);
+    } else {
+        // 新的排前面
+        cards.slice().reverse().forEach(card => {
+            const row = document.createElement('label');
+            row.className = 'sowhat-card-row';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = card.id;
+            checkbox.className = 'sowhat-card-check';
+            row.appendChild(checkbox);
+
+            const body = document.createElement('div');
+            body.className = 'sowhat-card-body';
+
+            const title = document.createElement('div');
+            title.className = 'sowhat-card-title';
+            title.textContent = card.title;
+            body.appendChild(title);
+
+            const meta = document.createElement('div');
+            meta.className = 'sowhat-card-meta';
+            const parts = [(card.created_at || '').slice(0, 10)];
+            if (card.cognitive_shift) parts.push('認知有改變');
+            if (card.tags && card.tags.length) parts.push(card.tags.map(t => `#${t}`).join(' '));
+            meta.textContent = parts.join('　');
+            body.appendChild(meta);
+
+            row.appendChild(body);
+            list.appendChild(row);
+        });
+    }
+    panel.appendChild(list);
+
+    const actions = document.createElement('div');
+    actions.className = 'sowhat-card-actions';
+
+    const selectedIds = () => Array.from(panel.querySelectorAll('.sowhat-card-check:checked')).map(c => c.value);
+
+    const insert = document.createElement('button');
+    insert.className = 'sowhat-option';
+    insert.textContent = '插入對話歷史';
+    insert.onclick = async () => {
+        const ids = selectedIds();
+        if (ids.length === 0) { alert('請先勾選要插入的卡片。'); return; }
+        if (!selectedConfig || !selectedConfig.apiUrl || !selectedConfig.modelId) {
+            alert('請先完整設定 API (網址、金鑰、模型)。');
+            return;
+        }
+        const all = await soWhatLoadCards();
+        const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+        for (const id of ids) {
+            const card = all.find(c => c.id === id);
+            if (card) {
+                await addConversation(conversationKey, { role: 'assistant', content: soWhatCardToMessage(card) });
+            }
+        }
+        overlay.remove();
+        loadConversations(selectedConfig); // 重畫，讓插入的卡片立刻出現
+    };
+
+    const remove = document.createElement('button');
+    remove.className = 'sowhat-option sowhat-option-exit';
+    remove.textContent = '刪除';
+    remove.onclick = async () => {
+        const ids = selectedIds();
+        if (ids.length === 0) { alert('請先勾選要刪除的卡片。'); return; }
+        if (!confirm(`確定要刪除 ${ids.length} 張卡片嗎？此動作無法復原。`)) return;
+        await soWhatDeleteCards(ids);
+        soWhatOpenCardTable(); // 重開以刷新清單
+    };
+
+    actions.appendChild(insert);
+    actions.appendChild(remove);
+    panel.appendChild(actions);
+
+    overlay.appendChild(panel);
+    // 點擊面板外面關閉
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) overlay.remove();
+    });
+    document.body.appendChild(overlay);
 }

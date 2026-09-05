@@ -375,12 +375,16 @@ function loadSelectedConfig() {
 }
 
 let loadConversationsCallCount = 0; // Debug counter
-function loadConversations(config) {
+// options.preserveScroll: 重畫清單但維持目前的捲動位置。串流結束後要補上
+// 刪除／複製／卡片資料表按鈕就得重畫，但不能讓畫面跳回頂部或底部。
+function loadConversations(config, options = {}) {
     loadConversationsCallCount++;
     console.log(`[DEBUG] loadConversations called. Count: ${loadConversationsCallCount}, Time: ${new Date().toLocaleTimeString()}`, 'Config:', config ? config.apiUrl : 'null');
 
     const conversationList = document.getElementById('conversationList');
     if (!conversationList) return;
+    const scrollDoc = document.scrollingElement || document.documentElement;
+    const preservedScrollTop = scrollDoc.scrollTop;
     conversationList.innerHTML = '';
 
     if (!config) {
@@ -388,6 +392,7 @@ function loadConversations(config) {
         placeholder.textContent = "請先在設定頁新增並選擇一個設定檔。";
         // ... (placeholder styling)
         conversationList.appendChild(placeholder);
+        if (typeof soWhatReattachThread === 'function') soWhatReattachThread(conversationList);
         return;
     }
 
@@ -401,7 +406,11 @@ function loadConversations(config) {
             placeholder.textContent = "尚無對話。";
             placeholder.style.textAlign = "center";
             placeholder.style.padding = "20px";
+            // 空對話時沒有訊息可以掛按鈕，入口改放在這裡
+            placeholder.classList.add('empty-with-card-button');
+            addCardTableButton(placeholder);
             conversationList.appendChild(placeholder);
+            if (typeof soWhatReattachThread === 'function') soWhatReattachThread(conversationList);
             return;
         }
 
@@ -447,9 +456,20 @@ function loadConversations(config) {
             copyButton.onclick = () => copySingleConversationContent(conversationKey, index);
             div.appendChild(copyButton);
 
+            addCardTableButton(div);
+
             conversationList.appendChild(div);
         });
-        scrollToBottom();
+
+        // 「所以呢？」的對話不在 conversations 裡，重畫會把它抹掉——接回去
+        if (typeof soWhatReattachThread === 'function') soWhatReattachThread(conversationList);
+
+        if (options.preserveScroll) {
+            scrollDoc.scrollTop = preservedScrollTop;
+            if (typeof options.onRendered === 'function') options.onRendered(conversationList);
+        } else {
+            scrollToBottom();
+        }
     });
 }
 
@@ -542,6 +562,8 @@ async function renderAndAppendConversationItem(messageObject, isNewItem = true) 
         copyButton.title = '複製此訊息';
         copyButton.onclick = () => copySingleConversationContent(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`, finalIndex);
         div.appendChild(copyButton);
+
+        addCardTableButton(div);
     }
 
 
@@ -591,6 +613,8 @@ async function updateConversationItem(message) { // message is {role, content}
     copyButton.innerHTML = '&#128203;';
     copyButton.onclick = () => copySingleConversationContent(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`, itemIndex);
     div.appendChild(copyButton);
+
+    addCardTableButton(div);
 
     addCopyButtonIfCodeExists(div);
 
@@ -1824,12 +1848,21 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 if (summary) summary.textContent = '顯示/隱藏 AI 思考過程';
             });
 
+            // 串流中的訊息框是手工建立的，沒有刪除／複製／卡片資料表按鈕。
+            // 這裡重畫一次清單把按鈕補上——索引由 loadConversations 統一計算，
+            // 比自己去猜串流 DOM 對應到哪幾筆儲存資料安全得多。
+            // 用 preserveScroll 維持捲動位置（原本不重畫就是為了避免跳回頂部）。
+            const startIndex = (await getConversations(conversationKey)).length;
             await parseAndStoreFinalAssistantResponse(accumulatedResponse, conversationKey);
-            // loadSelectedConfig(); // REMOVED: 避免回應完後重新載入導致畫面跳回頂部
-            
-            // 跳轉到最新回覆的起始位置（使用者已手動捲離時不打擾）
-            const targetElement = tempThinkDetailsDiv ? tempThinkDetailsDiv.parentElement : (tempMainResponseDiv ? tempMainResponseDiv.parentElement : null);
-            if (autoFollowScroll) scrollToBottom(targetElement);
+
+            loadConversations(selectedConfig, {
+                preserveScroll: true,
+                onRendered: (list) => {
+                    // 跳轉到最新回覆的起始位置（使用者已手動捲離時不打擾）
+                    const target = list.children[startIndex] || list.lastElementChild;
+                    if (autoFollowScroll && target) scrollToBottom(target);
+                }
+            });
         }
 
     } catch (error) {
@@ -2491,6 +2524,22 @@ function addCopyButtonIfCodeExists(container) {
             };
         }
     });
+}
+
+// 卡片資料表的入口鈕。三個渲染路徑（loadConversations /
+// renderAndAppendConversationItem / updateConversationItem）共用這一個 helper，
+// 不要各自再抄一份。實作在 sowhat.js，用 typeof 保護避免載入順序問題。
+function addCardTableButton(container) {
+    const button = document.createElement('button');
+    button.className = 'card-table-button';
+    button.innerHTML = '&#128451;';
+    button.title = '卡片資料表';
+    button.onclick = (event) => {
+        event.stopPropagation();
+        if (typeof soWhatOpenCardTable === 'function') soWhatOpenCardTable();
+    };
+    container.appendChild(button);
+    return button;
 }
 
 // NEW: Helper to scroll conversation list to bottom or a specific element
