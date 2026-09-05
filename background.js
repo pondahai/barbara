@@ -1,28 +1,41 @@
-chrome.runtime.onInstalled.addListener(() => {
-    chrome.contextMenus.create({
-        id: "summarizeContext",
-        title: "摘要",
-        contexts: ["selection"]
-    });
+// 右鍵選單項目定義。註冊是持久化的（存在 profile，不在 service worker 記憶體裡），
+// 所以新增項目時必須先 removeAll 再重建，否則舊的註冊會一直留著、新項目不會出現。
+const CONTEXT_MENU_ITEMS = [
+    { id: "summarizeContext", title: "摘要" },
+    { id: "translateContext", title: "翻譯" },
+    { id: "factCheckContext", title: "真的假的" },
+    { id: "soWhatContext", title: "所以呢？" }
+];
 
-    chrome.contextMenus.create({
-        id: "translateContext",
-        title: "翻譯",
-        contexts: ["selection"]
+function registerContextMenus() {
+    chrome.contextMenus.removeAll(() => {
+        CONTEXT_MENU_ITEMS.forEach(item => {
+            chrome.contextMenus.create({
+                id: item.id,
+                title: item.title,
+                contexts: ["selection"]
+            });
+        });
+        if (chrome.runtime.lastError) {
+            console.error("[contextMenus] 註冊失敗:", chrome.runtime.lastError);
+        } else {
+            console.log("[contextMenus] 已註冊", CONTEXT_MENU_ITEMS.length, "個選單項目");
+        }
     });
+}
 
-    chrome.contextMenus.create({
-        id: "factCheckContext",
-        title: "真的假的",
-        contexts: ["selection"]
-    });
-});
+// onInstalled 只在安裝／更新時觸發，「載入未封裝」重載時不保證會跑；
+// onStartup 補瀏覽器重啟；最後在 service worker 每次啟動時也跑一次，確保選單一定在。
+chrome.runtime.onInstalled.addListener(registerContextMenus);
+chrome.runtime.onStartup.addListener(registerContextMenus);
+registerContextMenus();
 
 // 右鍵選單項目 -> 側邊欄動作對照表
 const CONTEXT_MENU_ACTIONS = {
     summarizeContext: "summarizeFromContent",
     translateContext: "translateFromContent",
-    factCheckContext: "factCheckFromContent"
+    factCheckContext: "factCheckFromContent",
+    soWhatContext: "soWhatFromContent"
 };
 
 chrome.tabs.onActivated.addListener((activeInfo) => {

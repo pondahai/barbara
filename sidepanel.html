@@ -317,6 +317,246 @@
         .loading-indicator.show {
             display: block;
         }        
+
+        /* 「所以呢？」對話 —— 沿用 conversation-item 樣式，只補選項鈕與卡片欄位 */
+        .conversation-item.sowhat-item {
+            padding-bottom: 16px;
+            margin-bottom: 16px;
+        }
+        .sowhat-source {
+            margin: 0 0 6px 0;
+            padding-left: 8px;
+            border-left: 3px solid #bbb;
+            color: #555;
+            font-size: 0.92em;
+        }
+        .sowhat-source-meta {
+            color: #888;
+            font-size: 0.85em;
+        }
+        /* 選項鈕要蓋過 .delete-button（絕對定位、bottom:-10px、z-index:1），
+           否則會被上一則訊息突出來的刪除鈕壓住 */
+        .sowhat-options {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            gap: 6px;
+            margin-top: 8px;
+            position: relative;
+            z-index: 2;
+        }
+        .sowhat-options.answered { opacity: 0.5; }
+        button.sowhat-option {
+            /* margin-top 必須歸零：全域的 `select, input, button` 規則會塞 5px 進來，
+               和 flex gap 疊加後整組選項會被撐高 */
+            margin: 0;
+            padding: 6px 10px;
+            font-size: 0.9em;
+            border: 1px solid #007bff;
+            background-color: #fff;
+            color: #007bff;
+            border-radius: 14px;
+            cursor: pointer;
+            width: auto;
+            max-width: 100%;
+            white-space: normal;
+            text-align: left;
+            line-height: 1.3;
+        }
+        button.sowhat-option:hover:not(:disabled) {
+            background-color: #007bff;
+            color: #fff;
+        }
+        button.sowhat-option-exit {
+            border-color: #888;
+            color: #666;
+        }
+        button.sowhat-option-exit:hover:not(:disabled) {
+            background-color: #888;
+        }
+        .sowhat-freetext {
+            display: flex;
+            gap: 6px;
+            width: 100%;
+            margin-top: 4px;
+        }
+        .sowhat-freetext input {
+            flex: 1;
+            min-width: 0;
+            width: auto;
+            margin: 0;
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 14px;
+        }
+        .sowhat-title {
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .sowhat-takeaway { margin-bottom: 8px; }
+        .sowhat-note {
+            color: #a06000;
+            font-size: 0.85em;
+            margin: 4px 0;
+        }
+        .sowhat-tags {
+            color: #007bff;
+            font-size: 0.85em;
+            margin-top: 6px;
+        }
+        .sowhat-open-questions {
+            margin: 6px 0 0 0;
+            padding-left: 20px;
+            font-size: 0.9em;
+        }
+        .sowhat-raw-text {
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 0.85em;
+            background: rgba(0,0,0,0.05);
+            padding: 6px;
+            border-radius: 4px;
+        }
+        .sowhat-edit-input {
+            width: 100%;
+            min-height: 80px;
+            box-sizing: border-box;
+            margin-bottom: 6px;
+        }
+
+        /* 卡片資料表入口鈕：跟既有的刪除(X)、複製(📋)並排，沿用同一套絕對定位 */
+        .conversation-item button.card-table-button {
+            background: none;
+            border: none;
+            color: #6a4c93;
+            cursor: pointer;
+            font-size: 18px;
+            position: absolute;
+            bottom: -8px;
+            right: 70px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            padding: 0;
+            margin: 0;
+            z-index: 1;
+        }
+        body.answer-locked .conversation-item button.card-table-button {
+            pointer-events: none;
+            opacity: 0.35;
+        }
+        /* 空對話時入口鈕改為置中的一般按鈕，不用絕對定位 */
+        .empty-with-card-button button.card-table-button {
+            position: static;
+            display: inline-flex;
+            margin-top: 10px;
+            font-size: 22px;
+            width: auto;
+            height: auto;
+            background: none;
+            border: none;
+            color: #6a4c93;
+            cursor: pointer;
+        }
+
+        /* 卡片資料表覆蓋層 */
+        .sowhat-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+        .sowhat-card-panel {
+            background: #fff;
+            color: #000;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 100%;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            box-sizing: border-box;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        }
+        .sowhat-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .sowhat-card-list {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .sowhat-card-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 8px 4px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .sowhat-card-row input.sowhat-card-check {
+            width: auto;
+            margin: 2px 0 0 0;
+            flex: none;
+        }
+        .sowhat-card-body { min-width: 0; }
+        .sowhat-card-title {
+            font-weight: bold;
+            word-break: break-word;
+        }
+        .sowhat-card-meta {
+            color: #888;
+            font-size: 0.82em;
+            margin-top: 2px;
+            word-break: break-word;
+        }
+        .sowhat-card-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        /* 「所以呢？」整段對話的容器。收尾後整段搬進 <details> 摺起來：
+           過程還看得到，但不再佔畫面。重開側欄就不會再出現（卡片才是留下來的東西）。 */
+        .sowhat-thread-details {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: rgba(255, 255, 255, 0.6);
+            padding: 8px 10px;
+            margin-bottom: 10px;
+        }
+        .sowhat-thread-details > summary {
+            cursor: pointer;
+            font-weight: bold;
+            color: #6a4c93;
+            word-break: break-word;
+        }
+        /* 摺疊後裡面的訊息框不用再各自畫框，省得層層疊框 */
+        .sowhat-thread-details .conversation-item {
+            border: none;
+            padding: 6px 0;
+            margin-bottom: 0;
+            background: none;
+        }
+        .sowhat-thread-details[open] > summary {
+            margin-bottom: 6px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 6px;
+        }
     </style>
 </head>
 <body>
@@ -377,5 +617,6 @@
 
     <script src="marked.min.js"></script>
     <script src="sidepanel.js"></script>
+    <script src="sowhat.js"></script>
 </body>
 </html>
