@@ -63,9 +63,16 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (request.action === "translateFromContent") {
                 translateTextFromContent(request.text);
             } else if (request.action === "factCheckFromContent") {
-                factCheckTextFromContent(request.text);
+                // 對圖片使用時先 OCR 成文字，再走原本的查核流程
+                if (request.imageUrl) factCheckImageFromContent(request.imageUrl);
+                else factCheckTextFromContent(request.text);
             } else if (request.action === "soWhatFromContent") {
-                soWhatFromContent(request.text);
+                if (request.imageUrl) soWhatImageFromContent(request.imageUrl);
+                else soWhatFromContent(request.text);
+            } else if (request.action === "ocrImageFromContent") {
+                ocrImageFromContent(request.imageUrl);
+            } else if (request.action === "translateImageFromContent") {
+                translateImageFromContent(request.imageUrl);
             }
         });
 
@@ -649,6 +656,49 @@ async function getCurrentPageContext() {
     });
 }
 
+// NEW HELPER: 取得當前分頁上的圖片元素清單（給 agent 的看圖技能用）
+async function getPageImagesContext() {
+    return new Promise((resolve) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs.length > 0) {
+                chrome.tabs.sendMessage(tabs[0].id, { action: "getPageImages" }, (response) => {
+                    if (chrome.runtime.lastError || !response) {
+                        console.warn("無法取得網頁圖片清單:", chrome.runtime.lastError);
+                        resolve(null);
+                    } else {
+                        resolve(response); // {title, url, images:[...]}
+                    }
+                });
+            } else {
+                resolve(null);
+            }
+        });
+    });
+}
+
+// NEW HELPER: 截取當前分頁的可視畫面，回傳 data URL。
+// 依賴 manifest 既有的 host_permissions "<all_urls>"（captureVisibleTab 的要求是
+// <all_urls> 或 activeTab，不是 "tabs" 權限），所以不需要新增任何權限。
+async function captureVisibleTabDataUrl() {
+    return new Promise((resolve, reject) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (!tabs || tabs.length === 0) return reject(new Error('找不到作用中的分頁'));
+            chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'jpeg', quality: 85 }, (dataUrl) => {
+                if (chrome.runtime.lastError || !dataUrl) {
+                    return reject(new Error(chrome.runtime.lastError
+                        ? chrome.runtime.lastError.message
+                        : '截圖失敗（chrome:// 等特殊頁面無法截圖）'));
+                }
+                resolve(dataUrl);
+            });
+        });
+    });
+}
+
+// agent 用的最近一次圖片清單：look_at_page_image 可以用編號指定，
+// 不必要求模型把長長的圖片網址原封不動抄回來（本地模型很容易抄錯）。
+let lastListedPageImages = [];
+
 // NEW HELPER FUNCTION: Get YouTube Transcript from Active Tab
 async function getYoutubeTranscriptContext() {
     return new Promise((resolve) => {
@@ -839,6 +889,134 @@ async function getPageContentTokenBudget(config) {
 // === END 依模型 context 動態調整 ===
 
 const ToolRegistry = {
+    // ✨ 技能 6: 看畫面（截圖 -> vision -> 文字）
+    // agent loop 的 tool 訊息只吃純文字，所以截圖必須在工具內部先轉成文字描述，
+    // 不能把圖片本身塞進 tool 的回傳值。
+    see_current_screen: {
+        getDisplayName: () => "👁️ 看目前的網頁畫面 (截圖)",
+        getUiDescription: () => "代理想要截取你目前分頁的可視畫面並用視覺模型判讀，以了解畫面實際長什麼樣子。截圖只會送到你自己設定的模型伺服器。",
+        schema: {
+            type: "function",
+            function: {
+                name: "see_current_screen",
+                description: "當需要知道網頁『看起來』是什麼樣子，而不只是文字內容時呼叫此工具。適用情境：網頁文字讀不到內容（Canvas、圖片型 PDF、線上簡報）、需要確認版面配置或元素位置、使用者詢問畫面外觀或抱怨顯示異常。會截取當前可視畫面並回傳畫面內容的文字描述。",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        focus: {
+                            type: "string",
+                            description: "想從畫面中特別看清楚的重點，例如「主要按鈕的位置」「圖表的數值」。可省略。"
+                        }
+                    }
+                }
+            }
+        },
+        execute: async (args) => {
+            console.log("[Tool] 正在執行 see_current_screen...", args && args.focus);
+            try {
+                const raw = await captureVisibleTabDataUrl();
+                const dataUrl = await fetchImageAsDataUrl(raw); // 沿用縮圖邏輯，避免 payload 過大
+                const focus = (args && args.focus) ? `\n特別留意：${args.focus}` : '';
+                const prompt = `這是一張瀏覽器可視畫面的截圖。請描述畫面內容，供後續判斷使用：\n` +
+                    `1. 逐字抄出畫面上可讀的重要文字（標題、按鈕文字、數值、錯誤訊息）。\n` +
+                    `2. 說明版面配置：主要區塊的相對位置，以及可互動元素（按鈕、輸入框、連結）大概在畫面的哪個位置。\n` +
+                    `3. 若有圖表，描述其類型與呈現的趨勢或數值。\n` +
+                    `4. 只描述實際看到的內容，看不清楚就說看不清楚，不要臆測。${focus}`;
+                const description = await transcribeImageToText(selectedConfig, dataUrl, prompt);
+                return `目前畫面的判讀結果：\n${description}`;
+            } catch (error) {
+                return `工具執行失敗: ${error.message}`;
+            }
+        }
+    },
+    // ✨ 技能 7: 列出網頁裡的圖片元素
+    list_page_images: {
+        getDisplayName: () => "🖼️ 列出網頁上的圖片",
+        getUiDescription: () => "代理想要列出目前網頁上的圖片清單（網址、替代文字、尺寸），以便決定要細看哪一張。",
+        schema: {
+            type: "function",
+            function: {
+                name: "list_page_images",
+                description: "當需要知道當前網頁上有哪些圖片時呼叫此工具。回傳帶編號的圖片清單（編號、替代文字 alt、尺寸、網址）。要細看其中某一張的實際內容時，接著用 look_at_page_image 並帶入編號。",
+                parameters: { type: "object", properties: {} }
+            }
+        },
+        execute: async () => {
+            console.log("[Tool] 正在執行 list_page_images...");
+            try {
+                const data = await getPageImagesContext();
+                if (!data) return "工具執行失敗，無法讀取網頁圖片（可能是特殊頁面，或需要重新整理網頁讓外掛的 content script 載入）。";
+                lastListedPageImages = data.images || [];
+                if (lastListedPageImages.length === 0) return `網頁「${data.title}」上沒有找到夠大的圖片元素。`;
+                const lines = lastListedPageImages.map(img => {
+                    const altPart = img.alt ? `alt「${img.alt}」` : '(無 alt)';
+                    const viewPart = img.inViewport ? ' (在畫面內)' : '';
+                    return `${img.index}. ${altPart} — ${img.width}x${img.height}${viewPart}\n   ${img.src}`;
+                }).join('\n');
+                return `網頁「${data.title}」上的圖片共 ${lastListedPageImages.length} 張：\n${lines}\n\n要看某張圖片的實際內容，請用 look_at_page_image 並帶入上面的編號。`;
+            } catch (error) {
+                return `工具執行失敗: ${error.message}`;
+            }
+        }
+    },
+    // ✨ 技能 8: 細看網頁裡的某一張圖片
+    look_at_page_image: {
+        getDisplayName: () => "🔍 細看網頁上的某張圖片",
+        getUiDescription: (args) => {
+            const target = args.index ? `第 ${escapeHtml(String(args.index))} 張圖片` : escapeHtml(args.url || '(未指定)');
+            return `代理想要用視覺模型判讀${target}的實際內容。`;
+        },
+        schema: {
+            type: "function",
+            function: {
+                name: "look_at_page_image",
+                description: "用視覺模型判讀網頁上某一張圖片的實際內容（圖中文字、圖表數值、畫面描述）。通常先用 list_page_images 取得編號後再呼叫。可用 index 帶入清單編號，或用 url 直接指定圖片網址。",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        index: {
+                            type: "number",
+                            description: "list_page_images 回傳清單中的圖片編號，例如 2。"
+                        },
+                        url: {
+                            type: "string",
+                            description: "圖片的完整網址。沒有編號可用時才使用。"
+                        },
+                        question: {
+                            type: "string",
+                            description: "想從這張圖片得知的具體問題，例如「圖表中 2024 年的數值是多少」。可省略。"
+                        }
+                    }
+                }
+            }
+        },
+        execute: async (args) => {
+            console.log("[Tool] 正在執行 look_at_page_image...", args);
+            try {
+                let imageUrl = args.url || '';
+                if (!imageUrl && args.index) {
+                    const hit = lastListedPageImages.find(img => img.index === Number(args.index));
+                    if (!hit) {
+                        return `找不到編號 ${args.index} 的圖片。請先呼叫 list_page_images 取得目前網頁的圖片清單。`;
+                    }
+                    imageUrl = hit.src;
+                }
+                if (!imageUrl) return "未指定圖片。請提供 index（需先呼叫 list_page_images）或 url。";
+
+                const dataUrl = await fetchImageAsDataUrl(imageUrl);
+                const question = args.question ? `\n請特別回答這個問題：${args.question}` : '';
+                const prompt = `請判讀這張圖片的內容：\n` +
+                    `1. 逐字抄出圖片中的所有文字（保留換行與條列順序，不要翻譯或改寫）。\n` +
+                    `2. 若有圖表或數據，說明其類型與具體數值、趨勢。\n` +
+                    `3. 若圖片沒有文字，簡短描述畫面內容。\n` +
+                    `4. 只描述實際看到的內容，不要推測。${question}`;
+                const description = await transcribeImageToText(selectedConfig, dataUrl, prompt);
+                return `圖片判讀結果 (${imageUrl})：\n${description}`;
+            } catch (error) {
+                return `工具執行失敗: ${error.message}`;
+            }
+        }
+    },
     // 技能 1: 讀網頁
     read_current_webpage: {
         getDisplayName: () => "📄 讀取當前網頁",
@@ -2188,6 +2366,215 @@ async function factCheckTextFromContent(text) {
         await addConversation(conversationKey, errorResponseMessage);
         loadSelectedConfig();
     }
+}
+
+// === 圖片（vision）功能 ===
+// 設計原則：存進歷史與畫面上的 content 一律維持「字串」，只有真正要送出去的那一則
+// user message 才改用 OpenAI vision 的 parts 陣列。這樣所有既有的 marked.parse 渲染、
+// 複製、刪除索引比對邏輯都完全不受影響。
+
+const VISION_IMAGE_MAX_DIMENSION = 2048; // 長邊上限，超過就縮圖，避免 payload 過大
+const VISION_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+
+function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('圖片讀取失敗'));
+        reader.readAsDataURL(blob);
+    });
+}
+
+// 把圖片網址抓下來轉成 data URL。本地推論伺服器（LM Studio 等）多半不會自己去外網抓圖，
+// 所以一律由側欄下載後以 base64 內嵌送出。
+async function fetchImageAsDataUrl(imageUrl) {
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error(`無法下載圖片 (HTTP ${response.status})`);
+    const blob = await response.blob();
+    if (blob.type && !blob.type.startsWith('image/')) {
+        throw new Error(`這個網址不是圖片 (${blob.type})`);
+    }
+
+    let bitmap = null;
+    try {
+        bitmap = await createImageBitmap(blob);
+    } catch (e) {
+        // 解不開就直接原樣送出，交給模型自己處理
+        console.warn('[vision] createImageBitmap 失敗，改送原圖:', e);
+        return await blobToDataUrl(blob);
+    }
+
+    const longSide = Math.max(bitmap.width, bitmap.height);
+    const needsResize = longSide > VISION_IMAGE_MAX_DIMENSION || blob.size > VISION_IMAGE_MAX_BYTES;
+    if (!needsResize) {
+        bitmap.close();
+        return await blobToDataUrl(blob);
+    }
+
+    const scale = Math.min(1, VISION_IMAGE_MAX_DIMENSION / longSide);
+    const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const resized = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
+    console.log(`[vision] 圖片已縮至 ${canvas.width}x${canvas.height}, ${resized.size} bytes`);
+    return await blobToDataUrl(resized);
+}
+
+// OpenAI 相容的多模態 content（只在送出時使用，不進歷史紀錄）
+function buildVisionContent(text, dataUrl) {
+    return [
+        { type: 'text', text: text },
+        { type: 'image_url', image_url: { url: dataUrl } }
+    ];
+}
+
+async function runImageVisionTask(imageUrl, promptText, displayLabel, errorLabel) {
+    if (!imageUrl) { alert("無圖片資料"); return; }
+    if (!selectedConfig) { alert("請先設定 API 網址和 API 金鑰"); return; }
+
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    // 歷史與畫面上只留提示文字＋圖片 markdown（字串），維持既有渲染路徑
+    const displayContent = `${displayLabel}
+
+![](${imageUrl})`;
+    const userMessage = { role: 'user', content: displayContent };
+
+    await addConversation(conversationKey, userMessage);
+    await updateConversationItem(userMessage);
+
+    try {
+        const dataUrl = await fetchImageAsDataUrl(imageUrl);
+        await runAgentStreamLoop(
+            selectedConfig,
+            [{ role: 'user', content: buildVisionContent(promptText, dataUrl) }],
+            conversationKey
+        );
+    } catch (error) {
+        console.error(`Error in ${errorLabel}:`, error);
+        const errorResponseMessage = {
+            role: 'assistant',
+            content: `${errorLabel}錯誤: ${error.message}
+
+（若模型回報無法處理影像，請確認目前選用的是支援 vision 的模型）`,
+            isThinking: false
+        };
+        await addConversation(conversationKey, errorResponseMessage);
+        loadSelectedConfig();
+    }
+}
+
+// 單次非串流的 vision 呼叫：把圖片轉成文字，供後續純文字的多輪流程使用。
+// agent loop 的 tool 訊息只吃純文字，所以圖片必須在進入 loop 之前就轉成文字。
+async function transcribeImageToText(config, dataUrl, customPrompt) {
+    const prompt = customPrompt || `請描述這張圖片的完整內容，供後續分析使用：
+` +
+        `1. 先逐字抄出圖片中所有文字（保留換行與條列順序，不要翻譯或改寫）。
+` +
+        `2. 若圖片有文字之外的重要視覺資訊（圖表趨勢、數據、人物、場景、來源浮水印等），再簡短補述。
+` +
+        `3. 只描述實際看到的內容，不要推測或補充圖片以外的資訊。`;
+
+    const response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiKey}`,
+            'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({
+            model: config.modelId,
+            messages: [{ role: 'user', content: buildVisionContent(prompt, dataUrl) }],
+            stream: false,
+            temperature: 0
+        })
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        throw new Error(`讀取圖片失敗: HTTP ${response.status} ${errorData.message || ''}`);
+    }
+    const data = await response.json();
+    const text = (data.choices && data.choices[0] && data.choices[0].message)
+        ? (data.choices[0].message.content || '').trim() : '';
+    if (!text) throw new Error('模型沒有回傳任何圖片內容（請確認選用的是支援 vision 的模型）');
+    return text;
+}
+
+// 圖片 -> 文字的共用前置：畫面上先貼出圖片與辨識結果，再把文字交給既有的文字流程。
+// 回傳 OCR 文字；失敗時回傳 null（錯誤訊息已寫進對話）。
+async function imageToTextForPipeline(imageUrl, label) {
+    if (!imageUrl) { alert("無圖片資料"); return null; }
+    if (!selectedConfig) { alert("請先設定 API 網址和 API 金鑰"); return null; }
+
+    const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
+    const userMessage = { role: 'user', content: `${label}（圖片）
+
+![](${imageUrl})` };
+    await addConversation(conversationKey, userMessage);
+    await updateConversationItem(userMessage);
+
+    setInterfaceLoading(true);
+    try {
+        const dataUrl = await fetchImageAsDataUrl(imageUrl);
+        const text = await transcribeImageToText(selectedConfig, dataUrl);
+        const ocrMessage = { role: 'assistant', content: `**圖片內容辨識結果**
+
+${text}`, isThinking: false };
+        await addConversation(conversationKey, ocrMessage);
+        await updateConversationItem(ocrMessage);
+        return text;
+    } catch (error) {
+        console.error(`Error transcribing image for ${label}:`, error);
+        const errorResponseMessage = { role: 'assistant', content: `${label}錯誤: ${error.message}`, isThinking: false };
+        await addConversation(conversationKey, errorResponseMessage);
+        loadSelectedConfig();
+        return null;
+    } finally {
+        setInterfaceLoading(false);
+    }
+}
+
+// 右鍵圖片 -> 「真的假的」：先 OCR，再交給原本的查核 agent 流程
+async function factCheckImageFromContent(imageUrl) {
+    const text = await imageToTextForPipeline(imageUrl, '真的假的');
+    if (text) await factCheckTextFromContent(text);
+}
+
+// 右鍵圖片 -> 「所以呢？」：先 OCR，再交給原本的內化對話流程
+async function soWhatImageFromContent(imageUrl) {
+    const text = await imageToTextForPipeline(imageUrl, '所以呢？');
+    if (text) await soWhatFromContent(text);
+}
+
+// 右鍵圖片 -> 讀取圖片文字（OCR）
+async function ocrImageFromContent(imageUrl) {
+    const replyLanguage = getLanguageNameForPrompt(navigator.language || 'zh-TW');
+    const prompt = `請讀出這張圖片裡的所有文字（OCR），要求如下：
+` +
+        `1. 逐字照抄，保留原本的語言、換行與條列順序，不要翻譯、不要改寫、不要補充。
+` +
+        `2. 若是表格，請用 Markdown 表格呈現。
+` +
+        `3. 文字之外的內容不用描述。
+` +
+        `4. 如果圖片中完全沒有文字，就用 ${replyLanguage} 回答「圖片中沒有文字」，並用一句話描述圖片內容。`;
+    await runImageVisionTask(imageUrl, prompt, '讀取圖片文字', '圖片文字辨識');
+}
+
+// 右鍵圖片 -> 翻譯圖片中的文字
+async function translateImageFromContent(imageUrl) {
+    const browserLang = navigator.language || 'zh-TW';
+    const localLanguage = getLanguageNameForPrompt(browserLang);
+    const prompt = `請翻譯這張圖片裡的文字，步驟如下：
+` +
+        `1. 先逐字讀出圖片中的原文，保留換行與條列順序。
+` +
+        `2. 再把它翻譯成 ${localLanguage}；如果原文本來就是 ${localLanguage}，則改翻成 English。
+` +
+        `3. 輸出格式：先「原文」段落，再「翻譯」段落，兩段用標題分開。
+` +
+        `4. 只翻譯圖片中實際存在的文字，看不清楚的地方標註 [無法辨識]，不要自行臆測補字。`;
+    await runImageVisionTask(imageUrl, prompt, '翻譯圖片', '圖片翻譯');
 }
 
 // NEW HELPER for getting language name suitable for a prompt

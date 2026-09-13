@@ -278,9 +278,32 @@ function soWhatEnsureThread() {
     if (!soWhatThreadEl) {
         soWhatThreadEl = document.createElement('div');
         soWhatThreadEl.className = 'sowhat-thread';
+        soWhatThreadEl.appendChild(soWhatBuildThreadDeleteButton());
     }
     if (soWhatThreadEl.parentElement !== list) list.appendChild(soWhatThreadEl);
     return soWhatThreadEl;
+}
+
+// 這段對話不在 conversations 裡（它只活在 DOM 與 session storage），所以一般
+// conversation-item 的刪除鈕對它無效。這裡給整段 thread 一個自己的刪除鈕：
+// 移除節點、丟掉未完成的 session，讓使用者不必重開側欄也能清掉。
+function soWhatBuildThreadDeleteButton() {
+    const button = document.createElement('button');
+    button.className = 'delete-button sowhat-thread-delete';
+    button.textContent = 'X';
+    button.title = '刪除整段「所以呢？」對話';
+    button.onclick = async () => {
+        if (!confirm('確定要刪除整段「所以呢？」對話嗎？（已存成的卡片不受影響）')) return;
+        try {
+            await soWhatClearSession();
+        } catch (e) {
+            console.error('[所以呢？] 清除 session 失敗:', e);
+        }
+        if (soWhatThreadEl) soWhatThreadEl.remove();
+        soWhatThreadEl = null;
+        soWhatSession = null;
+    };
+    return button;
 }
 
 // 給 loadConversations 在重畫後呼叫：把這段對話接回清單尾端
@@ -298,7 +321,11 @@ function soWhatCollapseThread(title) {
     const summary = document.createElement('summary');
     summary.textContent = `所以呢？ — ${title}`;
     details.appendChild(summary);
-    while (thread.firstChild) details.appendChild(thread.firstChild);
+    // 刪除鈕要留在 thread 上（摺疊後仍要看得到、按得到），只搬其他內容進 details
+    Array.from(thread.childNodes).forEach(node => {
+        if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('sowhat-thread-delete')) return;
+        details.appendChild(node);
+    });
     thread.appendChild(details);
     thread.dataset.collapsed = '1';
 }

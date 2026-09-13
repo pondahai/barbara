@@ -65,6 +65,14 @@
             overflow-wrap: anywhere;
         }
         .conversation-item:nth-child(even) { background-color: rgba(255, 255, 255, 0.6); }
+        /* 圖片訊息（右鍵「讀取圖片文字」／「翻譯圖片」）不要撐破側欄 */
+        .conversation-item img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 6px 0;
+            border-radius: 4px;
+        }
         .conversation-item button.delete-button { 
             background: none; 
             border: none; 
@@ -84,6 +92,7 @@
         }
         /* NEW: 回答期間鎖住刪除鈕與換頁鈕 */
         body.answer-locked .conversation-item button.delete-button,
+        body.answer-locked .sowhat-thread > button.sowhat-thread-delete,
         body.answer-locked .nav-button {
             pointer-events: none;
             opacity: 0.35;
@@ -532,6 +541,28 @@
 
         /* 「所以呢？」整段對話的容器。收尾後整段搬進 <details> 摺起來：
            過程還看得到，但不再佔畫面。重開側欄就不會再出現（卡片才是留下來的東西）。 */
+        /* 「所以呢？」整段對話的刪除鈕：這段不在 conversations 裡，需要自己的入口 */
+        .sowhat-thread {
+            position: relative;
+            padding-top: 18px;
+        }
+        .sowhat-thread > button.sowhat-thread-delete {
+            background: none;
+            border: none;
+            color: red;
+            cursor: pointer;
+            font-size: 18px;
+            position: absolute;
+            top: 0;
+            right: 6px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            z-index: 2;
+        }
         .sowhat-thread-details {
             border: 1px solid #ccc;
             border-radius: 5px;

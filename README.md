@@ -1,7 +1,13 @@
 # barbara
 Barbara 是一款 Chrome 擴充工具，依賴本地 LLM 伺服器如 LMStudio 進行雙語翻譯、文章摘要，並具備主動讀取與改寫網頁的 Agent 能力。  
 
-## 最新更新 (v1.61)
+## 最新更新 (v1.68)
+* **Agent 看圖能力 (Vision Tools)**: Agent 新增 `see_current_screen`、`list_page_images`、`look_at_page_image` 三項技能，能主動截取畫面或挑選網頁上的圖片來判讀。由於 agent 的工具回傳只吃純文字，圖片會在工具內部先經視覺模型轉成文字描述再交回推理迴圈。
+* **圖片理解 (Vision)**: 在任意網頁圖片上按右鍵，即可使用 **「讀取圖片文字」** (OCR) 與 **「翻譯圖片」** 兩項新功能。適用於梗圖、投影片截圖、掃描文件、外文菜單等 DOM 抓不到文字的場合。
+    * 圖片由側欄下載後以 base64 內嵌送出（本地伺服器通常不會自行對外抓圖），過大的圖會自動縮至長邊 2048px。
+    * 需搭配支援 vision 的模型（如 Qwen2.5-VL、Gemma 3 等）。
+
+## 過往更新 (v1.61)
 * **Gemma 4 ReAct 範式支援**: 針對最新 **Gemma 4** 模型優化了 ReAct 推理結構，並支援其特有的 `<|channel>thought` 思考標籤，顯著提升了本地模型執行工具調用 (Tool Calling) 的成功率與邏輯嚴密性。
 * **推理模型支持 (Reasoning Support)**: 完美解析並呈現 `<think>` (DeepSeek) 與 `<|channel>thought` (Gemma 4) 標籤。現在您可以實時查看不同模型的完整思考過程。
 * **智慧代理系統 (Active AI Agent)**: 正式引入具備 `read_current_webpage` 與 `execute_javascript_on_page` 等能力的 Agent 循環。
@@ -31,6 +37,9 @@ Barbara 是一款強大且直觀的 Chrome 擴充功能，專為提升網頁瀏�
         * 🌐 `open_new_tab`: 根據網址或搜尋關鍵字開啟新分頁。
         * ⏪ `switch_to_previous_tab`: 快速切換回上一個瀏覽的分頁。
         * 🔍 `switch_to_tab`: 根據關鍵字尋找並切換到已開啟的特定分頁。
+        * 👁️ `see_current_screen`: 截取當前可視畫面並用視覺模型判讀，處理 DOM 讀不到的 Canvas、圖片型 PDF 與版面問題。
+        * 🖼️ `list_page_images`: 列出網頁上的圖片元素（編號、alt、尺寸、網址）。
+        * 🔍 `look_at_page_image`: 依編號或網址細看某張圖片的實際內容（圖中文字、圖表數值）。
     * **遞迴思考迴圈**: Agent 具備初步的 Chain-of-Thought (思考鏈) 並有能力連續呼叫多個工具直到任務完成。
     * **人類回圈確認 (Human-in-the-loop)**: 所有 Agent 的操作 (包含執行 JS、開新分頁等) 皆需要使用者透過 UI 按下「允許 (Approve)」才能執行，保障您的瀏覽器安全並有效控制 API 請求速率。
 * **互動式聊天**: 內建的聊天功能使您能與人工智慧助手互動，解答疑問或提供建議。

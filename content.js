@@ -3,6 +3,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chrome.runtime.sendMessage({ action: "summarizeFromContent", text: request.text });
     } else if (request.action === "translateFromContextMenu") {
         chrome.runtime.sendMessage({ action: "translateFromContent", text: request.text });
+    } else if (request.action === "getPageImages") {
+        // 列出網頁上「看得到、夠大」的圖片，給 agent 挑要看哪一張。
+        // 太小的多半是 icon、追蹤像素、間隔圖，列出來只會浪費 context。
+        const MIN_SIDE = 64;
+        const MAX_IMAGES = 30;
+        const seen = new Set();
+        const images = [];
+        for (const img of document.querySelectorAll('img')) {
+            const src = img.currentSrc || img.src || '';
+            if (!src || src.startsWith('blob:')) continue; // blob: 在側欄抓不到
+            if (seen.has(src)) continue;
+            const rect = img.getBoundingClientRect();
+            const width = Math.round(rect.width) || img.naturalWidth || 0;
+            const height = Math.round(rect.height) || img.naturalHeight || 0;
+            if (width < MIN_SIDE || height < MIN_SIDE) continue;
+            const style = window.getComputedStyle(img);
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
+            seen.add(src);
+            images.push({
+                index: images.length + 1,
+                src: src,
+                alt: (img.alt || '').trim().slice(0, 200),
+                width: width,
+                height: height,
+                inViewport: rect.top < window.innerHeight && rect.bottom > 0
+            });
+            if (images.length >= MAX_IMAGES) break;
+        }
+        sendResponse({ title: document.title, url: location.href, images: images });
     } else if (request.action === "getPageContent") {
         const pageTitle = document.title;
 
