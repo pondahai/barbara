@@ -3,9 +3,24 @@
 const CONTEXT_MENU_ITEMS = [
     { id: "summarizeContext", title: "摘要" },
     { id: "translateContext", title: "翻譯" },
-    { id: "factCheckContext", title: "真的假的" },
-    { id: "soWhatContext", title: "所以呢？" }
+    // 這兩項文字、圖片都吃：對圖片使用時會先做一次 OCR 再走原本的流程
+    { id: "factCheckContext", title: "真的假的", contexts: ["selection", "image"] },
+    { id: "soWhatContext", title: "所以呢？", contexts: ["selection", "image"] },
+    // 圖片類選單：contexts 是 "image"，右鍵點圖片才會出現，info.srcUrl 帶圖片網址
+    { id: "ocrImageContext", title: "讀取圖片文字", contexts: ["image"] },
+    { id: "translateImageContext", title: "翻譯圖片", contexts: ["image"] }
 ];
+
+// 這些選單只走圖片路徑（用 info.srcUrl），不需要選取文字，也不要去讀剪貼簿
+const IMAGE_MENU_IDS = new Set(["ocrImageContext", "translateImageContext"]);
+
+// 判斷這次點擊該不該走圖片路徑：純圖片選單一定是；文字/圖片兼用的選單則看
+// 使用者是不是在「沒有選取文字的情況下」對圖片按右鍵。有選文字就以文字優先。
+function shouldUseImagePath(info) {
+    if (IMAGE_MENU_IDS.has(info.menuItemId)) return true;
+    const hasSelection = info.selectionText && info.selectionText.trim() !== "";
+    return !!info.srcUrl && !hasSelection;
+}
 
 function registerContextMenus() {
     chrome.contextMenus.removeAll(() => {
@@ -13,7 +28,7 @@ function registerContextMenus() {
             chrome.contextMenus.create({
                 id: item.id,
                 title: item.title,
-                contexts: ["selection"]
+                contexts: item.contexts || ["selection"]
             });
         });
         if (chrome.runtime.lastError) {
@@ -35,7 +50,9 @@ const CONTEXT_MENU_ACTIONS = {
     summarizeContext: "summarizeFromContent",
     translateContext: "translateFromContent",
     factCheckContext: "factCheckFromContent",
-    soWhatContext: "soWhatFromContent"
+    soWhatContext: "soWhatFromContent",
+    ocrImageContext: "ocrImageFromContent",
+    translateImageContext: "translateImageFromContent"
 };
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
@@ -70,6 +87,12 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     }
     lastContextMenuClickTime = now;
 
+    // 圖片路徑不依賴選取文字，直接把 srcUrl 送出去
+    if (shouldUseImagePath(info)) {
+        processPayload(info, tab, { text: "", imageUrl: info.srcUrl || "" });
+        return;
+    }
+
     let text = info.selectionText;
 
     if (!text || text.trim() === "") {
@@ -86,47 +109,47 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
             navigator.clipboard.readText()
                 .then(clippedText => {
                     text = clippedText;
-                    processText(info, tab, text);
+                    processPayload(info, tab, { text: text, imageUrl: "" });
                 })
                 .catch(error => {
                     console.error("Failed to copy or read clipboard content:", error);
-                    processText(info, tab, text);
+                    processPayload(info, tab, { text: text, imageUrl: "" });
                 });
         } catch (error) {
             console.error("Failed to copy or read clipboard content:", error);
-            processText(info, tab, text);
+            processPayload(info, tab, { text: text, imageUrl: "" });
         }
     } else {
-        processText(info, tab, text);
+        processPayload(info, tab, { text: text, imageUrl: "" });
     }
 });
 
-function processText(info, tab, text) {
-    console.log("[processText] Triggered with text:", text);
+function processPayload(info, tab, payload) {
+    console.log("[processPayload] Triggered with payload:", payload);
     let windowId = tab ? tab.windowId : null;
     let tabId = tab ? tab.id : null;
-    console.log("[processText] Initial windowId:", windowId, "tabId:", tabId);
+    console.log("[processPayload] Initial windowId:", windowId, "tabId:", tabId);
 
     if (windowId !== null) {
-        console.log("[processText] Proceeding with current windowId:", windowId);
-        openSidePanelAndSendMessage(info, windowId, tabId, text);
+        console.log("[processPayload] Proceeding with current windowId:", windowId);
+        openSidePanelAndSendMessage(info, windowId, tabId, payload);
     } else {
-        console.log("[processText] windowId is null, querying active tab...");
+        console.log("[processPayload] windowId is null, querying active tab...");
         // Fallback to the currently active tab in the current window
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (tabs && tabs.length > 0) {
                 windowId = tabs[0].windowId;
                 tabId = tabs[0].id;
-                console.log("[processText] Found active tab - windowId:", windowId, "tabId:", tabId);
-                openSidePanelAndSendMessage(info, windowId, tabId, text);
+                console.log("[processPayload] Found active tab - windowId:", windowId, "tabId:", tabId);
+                openSidePanelAndSendMessage(info, windowId, tabId, payload);
             } else {
-                console.error("[processText] No active tab found during fallback query.");
+                console.error("[processPayload] No active tab found during fallback query.");
             }
         });
     }
 }
 
-function openSidePanelAndSendMessage(info, targetWindowId, targetTabId, text) {
+function openSidePanelAndSendMessage(info, targetWindowId, targetTabId, payload) {
     console.log("[openSidePanel] Checking windowType for targetWindowId:", targetWindowId);
     const action = CONTEXT_MENU_ACTIONS[info.menuItemId] || "translateFromContent";
 
@@ -136,7 +159,7 @@ function openSidePanelAndSendMessage(info, targetWindowId, targetTabId, text) {
     chrome.windows.get(targetWindowId, (win) => {
         if (chrome.runtime.lastError) {
             console.error("[openSidePanel] Error getting window:", chrome.runtime.lastError);
-            return fallbackToOtherWindowOrPopup(action, text);
+            return fallbackToOtherWindowOrPopup(action, payload);
         }
 
         console.log("[openSidePanel] Window type is:", win.type);
@@ -150,18 +173,18 @@ function openSidePanelAndSendMessage(info, targetWindowId, targetTabId, text) {
                     setTimeout(() => {
                         console.log("[openSidePanel] Broadcasting message to side panel. Action:", mappedAction);
                         // Send globally so the side panel receives it
-                        chrome.runtime.sendMessage({ action: mappedAction, text: text })
+                        chrome.runtime.sendMessage({ action: mappedAction, text: payload.text, imageUrl: payload.imageUrl })
                             .catch(e => console.warn("[openSidePanel] Send message error (may mean no sidepanel listener ready):", e));
                     }, 500);
                 })
                 .catch((error) => {
                     console.warn("[openSidePanel] sidePanel.open failed in normal window. Error:", error);
-                    fallbackToOtherWindowOrPopup(action, text);
+                    fallbackToOtherWindowOrPopup(action, payload);
                 });
         } else {
             // It's a PWA or popup window. sidePanel won't work here. Trigger fallback immediately.
             console.warn("[openSidePanel] Target window is not 'normal' (it is '" + win.type + "'). Triggering fallback.");
-            fallbackToOtherWindowOrPopup(action, text);
+            fallbackToOtherWindowOrPopup(action, payload);
         }
     });
 }
@@ -175,7 +198,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
     }
 });
 
-function fallbackToOtherWindowOrPopup(action, text) {
+function fallbackToOtherWindowOrPopup(action, payload) {
     console.warn("[fallback] PWA context menu clicked. Bypassing other windows due to user gesture limits. Opening popup.");
 
     const mappedAction = action;
@@ -186,7 +209,7 @@ function fallbackToOtherWindowOrPopup(action, text) {
             if (chrome.runtime.lastError || !win) {
                 console.log("[fallback] Stored popup window no longer exists. Creating new one.");
                 fallbackPopupWindowId = null;
-                createPopupAndSendMessage(mappedAction, text);
+                createPopupAndSendMessage(mappedAction, payload);
             } else {
                 console.log("[fallback] Popup window already exists. Focusing and sending message.");
                 chrome.windows.update(fallbackPopupWindowId, { focused: true });
@@ -196,7 +219,8 @@ function fallbackToOtherWindowOrPopup(action, text) {
                     const existingTabId = win.tabs[0].id;
                     chrome.tabs.sendMessage(existingTabId, {
                         action: mappedAction,
-                        text: text,
+                        text: payload.text,
+                        imageUrl: payload.imageUrl,
                         bypassFocusCheck: true
                     }).catch(e => {
                         console.error("[fallback] Send message error to existing popup:", e);
@@ -207,11 +231,11 @@ function fallbackToOtherWindowOrPopup(action, text) {
             }
         });
     } else {
-        createPopupAndSendMessage(mappedAction, text);
+        createPopupAndSendMessage(mappedAction, payload);
     }
 }
 
-function createPopupAndSendMessage(mappedAction, text) {
+function createPopupAndSendMessage(mappedAction, payload) {
     // Ultimate Fallback: Open a dedicated popup window
     chrome.windows.create({
         url: chrome.runtime.getURL("sidepanel.html"),
@@ -237,7 +261,8 @@ function createPopupAndSendMessage(mappedAction, text) {
                         console.log(`[fallback] Popup tab loaded. Sending message. Action: ${mappedAction}`);
                         chrome.tabs.sendMessage(newTabId, {
                             action: mappedAction,
-                            text: text,
+                            text: payload.text,
+                            imageUrl: payload.imageUrl,
                             bypassFocusCheck: true
                         }).catch(e => console.error("[fallback] Final send message error:", e));
                     }, 200);
@@ -252,7 +277,8 @@ function createPopupAndSendMessage(mappedAction, text) {
                 console.log(`[fallback] Safety timeout reached, attempting send anyway.`);
                 chrome.tabs.sendMessage(newTabId, {
                     action: mappedAction,
-                    text: text,
+                    text: payload.text,
+                    imageUrl: payload.imageUrl,
                     bypassFocusCheck: true
                 }).catch(() => { }); // Suppress error here to avoid console spam
             }
