@@ -128,7 +128,11 @@ async function runSingleTurn(config, messages) {
     }
 
     const data = await response.json();
-    let content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    const message = (data.choices && data.choices[0] && data.choices[0].message) || {};
+    let content = message.content || '';
+    // 後端啟用 reasoning parser（如 vLLM --reasoning-parser）時，思考過程不在 content 裡，
+    // 而是獨立的 reasoning / reasoning_content 欄位。
+    const fieldReasoning = (message.reasoning_content || message.reasoning || '').trim();
     // 非串流時，思考過程會整段留在 content 裡。解析 JSON 之前必須把它剝掉，
     // 但要留下來顯示——其他功能都會把思考過程收進摺疊區塊，這裡也要一致。
     const thinkRegex = /(?:<think>|<\|channel>thought\n?|<thought>)([\s\S]*?)(?:<\/think>|<channel\|>|<\/thought>)/g;
@@ -138,6 +142,8 @@ async function runSingleTurn(config, messages) {
         if (match[1] && match[1].trim()) thinking.push(match[1].trim());
     }
     content = content.replace(thinkRegex, '');
+
+    if (fieldReasoning) thinking.unshift(fieldReasoning);
 
     return { content: content.trim(), thinking: thinking.join('\n\n') };
 }
