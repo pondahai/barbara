@@ -781,9 +781,37 @@ const conversationToolGrants = new Map(); // conversationKey -> Set<toolName>
 // 硬上限：每連續自動放行 N 輪，強制跳出一次人工確認（避免小模型空轉刷迴圈）
 const AUTO_APPROVE_CHECKPOINT_ROUNDS = 8;
 
+// === NEW: 預設免詢問的工具（唯讀 + 開分頁）===
+// 這些工具不會改變網頁狀態、不會讀取憑證，逐輪詢問只會打斷閱讀與查核流程，
+// 因此預設自動放行；執行結果仍會完整留在對話紀錄中供事後審閱。
+// 刻意不列入：
+//   - execute_javascript_on_page：能改 DOM、發請求、讀 token，必須保留人工確認。
+//   - see_current_screen：截取整個可見分頁，可能含與任務無關的隱私內容。
+// open_new_tab 雖然只是導航，但它是「把讀到的內容夾帶在 URL 送出去」的潛在出口
+// （prompt injection 的典型手法），所以自動放行的同時強制在畫面上顯示目標網址。
+const AUTO_GRANTED_TOOLS = new Set([
+    "read_current_webpage",
+    "list_page_images",
+    "look_at_page_image",
+    "get_youtube_transcript",
+    "open_new_tab",
+    // 切換分頁只是在既有分頁之間移動焦點，不發網路請求也不讀取內容，比開新分頁更無害
+    "switch_to_previous_tab",
+    "switch_to_tab",
+]);
+
+// 自動放行時需要強制顯示參數的工具（不折疊在 details 裡）
+const FORCE_DISCLOSE_TOOLS = new Set(["open_new_tab"]);
+
+function isAutoGrantedTool(toolName) {
+    return AUTO_GRANTED_TOOLS.has(toolName);
+}
+
 // 一次授權本對話所有工具（「綠燈通行」）：查核流程需要連續開分頁、讀網頁，
 // 逐輪詢問會打斷查核，因此進入查核前先把所有工具加入本對話授權清單。
-// 仍保留 AUTO_APPROVE_CHECKPOINT_ROUNDS 檢查點，避免小模型無限空轉。
+// 注意這裡刻意涵蓋 AUTO_GRANTED_TOOLS 以外的工具（執行 JS、截圖），是查核流程的
+// 明確取捨；自動放行的每一輪仍會在動作紀錄的「動作詳情」保留完整參數供事後審閱，
+// 並保留 AUTO_APPROVE_CHECKPOINT_ROUNDS 檢查點，避免小模型無限空轉。
 function grantAllTools(conversationKey) {
     const granted = getGrantedTools(conversationKey);
     Object.keys(ToolRegistry).forEach(name => granted.add(name));
@@ -1770,6 +1798,18 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                     toolsHtml += `<strong>⚙️ ${tName}</strong><br><code style="background-color: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 3px;">${tc.function.arguments}</code><br><br>`;
                 }
             }
+            // NEW: 自動放行時仍需強制揭露的參數（目前是 open_new_tab 的目標網址），
+            // 不折疊、直接顯示在動作紀錄上，讓使用者一眼看見代理把瀏覽器帶去哪裡。
+            let forcedDisclosureHtml = "";
+            for (const tc of validToolCalls) {
+                const tName = tc.function.name;
+                if (!FORCE_DISCLOSE_TOOLS.has(tName)) continue;
+                if (!ToolRegistry[tName] || !ToolRegistry[tName].getUiDescription) continue;
+                let tArgs = {};
+                try { tArgs = JSON.parse(tc.function.arguments || "{}"); } catch(e){ /* ignore parse errors, use empty args */ }
+                forcedDisclosureHtml += `<div style="margin-top: 6px; font-size: 0.9em; word-break: break-all;">${ToolRegistry[tName].getUiDescription(tArgs)}</div>`;
+            }
+
             const confSummary = document.createElement('div');
             confSummary.innerHTML = `<strong>⚠️ 代理請求執行以下操作:</strong><br><br>${toolsHtml}請確認是否允許執行？`;
             confSummary.style.padding = "10px";
@@ -1817,7 +1857,10 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             // NEW: 「本次對話都允許」判斷（以工具為單位的 first-use 授權）
             const grantedTools = getGrantedTools(conversationKey);
             const batchToolNames = [...new Set(validToolCalls.map(tc => tc.function.name))];
-            const allGranted = batchToolNames.every(name => grantedTools.has(name));
+            // 預設免詢問的工具（唯讀 + 開分頁）視同已授權，不需使用者按過「本次對話都允許」
+            const allGranted = batchToolNames.every(name => grantedTools.has(name) || isAutoGrantedTool(name));
+            // 本輪是否完全由「預設免詢問」放行（使用者從未對這些工具做過決定）
+            const autoGrantedByDefault = allGranted && batchToolNames.every(name => isAutoGrantedTool(name));
             // 硬上限檢查點：連續自動放行 N 輪後，強制人工確認一次
             const checkpointReached = recursionDepth > 0 && recursionDepth % AUTO_APPROVE_CHECKPOINT_ROUNDS === 0;
 
@@ -1892,7 +1935,9 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 let borderColor = '';
                 
                 if (userDecision === 'approve') {
-                    statusText = autoApprovedByGrant ? '✅ 已依「本次對話都允許」自動放行'
+                    statusText = autoApprovedByGrant
+                        ? (autoGrantedByDefault ? '✅ 已自動執行（唯讀／開分頁，預設免詢問）'
+                                                : '✅ 已依「本次對話都允許」自動放行')
                         : grantedThisRound ? '✅ 使用者已授權（本次對話此類動作不再詢問）'
                         : '✅ 使用者已授權執行操作';
                     statusColor = 'rgba(76, 175, 80, 0.1)';
@@ -1926,6 +1971,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                     <div style="padding: 10px; font-size: 0.9em; color: var(--text-color);">
                         <strong>${statusText}</strong><br>
                         <span style="opacity: 0.8; font-size: 0.95em;">動作項目: ${toolNames}</span>
+                        ${forcedDisclosureHtml}
                         ${autoDetailHtml}
                     </div>`;
             }
