@@ -829,7 +829,7 @@ function getGrantedTools(conversationKey) {
 
 // === 依模型 context 動態調整網頁內文長度 ===
 // 不再使用固定字元數上限，而是先問模型端的 context window，再換算成可用的字元預算。
-const DEFAULT_CONTEXT_TOKENS = 8192;   // 問不到 context 長度時的保守預設值
+const DEFAULT_CONTEXT_TOKENS = 32768;  // 問不到 context 長度時的樂觀預設值；真的超出時會由錯誤訊息學到實際上限並重試
 const RESERVED_OUTPUT_TOKENS = 2048;   // 保留給模型回覆
 const RESERVED_PROMPT_TOKENS = 2048;   // 保留給 system prompt、工具定義與既有對話
 const MIN_PAGE_TOKENS = 1024;          // 再怎麼小也至少給網頁內文這麼多
@@ -868,13 +868,32 @@ async function fetchModelContextWindow(config) {
         if (response.ok) {
             const data = await response.json();
             const model = (data.data || []).find(m => m && m.id === config.modelId);
-            const found = pickContextLength(model);
-            if (found) return found;
+            // vLLM: max_model_len；llama.cpp: meta.n_ctx_train（訓練長度，僅作為後備）
+            const found = pickContextLength(model) || pickContextLength(model && model.meta)
+                || (model && model.meta && model.meta.n_ctx_train > 0 ? model.meta.n_ctx_train : null);
+            if (found) {
+                // llama.cpp 實際載入的 n_ctx 可能小於訓練長度，優先用 /props 的值
+                const loaded = await fetchLlamaCppLoadedContext(config, headers);
+                return loaded || found;
+            }
         }
     } catch (error) {
         console.warn('[Context] /v1/models 查詢失敗:', error.message);
     }
-    return null;
+    return await fetchLlamaCppLoadedContext(config, headers);
+}
+
+// llama.cpp server: GET /props → default_generation_settings.n_ctx（實際載入的 context 長度）
+async function fetchLlamaCppLoadedContext(config, headers) {
+    try {
+        const response = await fetch(`${config.apiUrl}/props`, { headers });
+        if (!response.ok) return null;
+        const props = await response.json();
+        const settings = props && props.default_generation_settings;
+        return pickContextLength(settings) || pickContextLength(props);
+    } catch (error) {
+        return null;
+    }
 }
 
 async function getModelContextTokens(config) {
@@ -914,6 +933,53 @@ async function getPageContentTokenBudget(config) {
     const contextTokens = await getModelContextTokens(config);
     return Math.max(MIN_PAGE_TOKENS, contextTokens - RESERVED_OUTPUT_TOKENS - RESERVED_PROMPT_TOKENS);
 }
+
+// === 超出 context 時自動縮短重試 ===
+// 判斷錯誤訊息是否為 context 超限，並盡量從中解析出實際的 context 長度。
+// vLLM:      "This model's maximum context length is 32768 tokens. However, you requested ..."
+// llama.cpp: {"error":{"type":"exceed_context_size_error","n_ctx":8192,"message":"... available context size (8192 tokens)"}}
+// OpenAI:    "maximum context length is 128000 tokens"
+function parseContextOverflowError(errorText) {
+    if (!errorText) return null;
+    const isOverflow = /context length|context size|context window|exceed_context|n_ctx|too many tokens|prompt is too long|maximum.*tokens/i.test(errorText);
+    if (!isOverflow) return null;
+    const patterns = [
+        /"n_ctx"\s*:\s*(\d+)/i,
+        /maximum context length is\s*(\d+)/i,
+        /context size \((\d+)/i,
+        /context (?:length|size|window)[^\d]{0,30}(\d{3,})/i
+    ];
+    for (const re of patterns) {
+        const m = errorText.match(re);
+        if (m && Number(m[1]) > 0) return { limit: Number(m[1]) };
+    }
+    return { limit: null };
+}
+
+// 依新的 context 上限，重新截斷 currentMessages 裡 read_current_webpage 的工具結果。
+// 回傳是否有任何訊息被縮短（沒有可縮的就不必重試）。
+function shrinkPageToolMessages(messages, contextTokens) {
+    const pageIdx = messages.map((m, i) => (m.role === 'tool' && typeof m.content === 'string' && m.content.startsWith('網頁標題:')) ? i : -1).filter(i => i >= 0);
+    if (pageIdx.length === 0) return false;
+    const otherTokens = messages.reduce((sum, m, i) => pageIdx.includes(i) ? sum
+        : sum + estimateTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')), 0);
+    const total = Math.max(MIN_PAGE_TOKENS / 2, contextTokens - RESERVED_OUTPUT_TOKENS - otherTokens - 512);
+    const perPage = Math.floor(total / pageIdx.length);
+    let changed = false;
+    for (const i of pageIdx) {
+        const content = messages[i].content;
+        const splitAt = content.indexOf(':\n', content.indexOf('網頁內文'));
+        if (splitAt < 0) continue;
+        const header = content.slice(0, content.indexOf('網頁內文'));
+        const body = content.slice(splitAt + 2);
+        const { text, truncated } = truncateToTokenBudget(body, perPage);
+        if (!truncated) continue;
+        messages[i] = { ...messages[i], content: `${header}網頁內文(內容過長，超出模型 context，已自動縮短至約 ${perPage} tokens):\n${text}` };
+        changed = true;
+    }
+    return changed;
+}
+// === END 超出 context 時自動縮短重試 ===
 // === END 依模型 context 動態調整 ===
 
 const ToolRegistry = {
@@ -1460,19 +1526,41 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             payload.tool_choice = "auto";
         }
 
-        const response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.apiKey}`,
-                'ngrok-skip-browser-warning': 'true'
-            },
-            body: JSON.stringify(payload)
-        });
+        let response;
+        const MAX_OVERFLOW_RETRIES = 2;
+        for (let attempt = 0; ; attempt++) {
+            response = await fetch(`${config.apiUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${config.apiKey}`,
+                    'ngrok-skip-browser-warning': 'true'
+                },
+                body: JSON.stringify(payload)
+            });
+            if (response.ok) break;
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ message: response.statusText }));
-            throw new Error(`API 請求失敗: ${response.status} ${errorData.message || ''}`);
+            const errorText = await response.text().catch(() => response.statusText);
+            let errorMessage = errorText;
+            try {
+                const errorData = JSON.parse(errorText);
+                errorMessage = errorData.message || (errorData.error && errorData.error.message) || errorText;
+            } catch (e) { /* 非 JSON 錯誤，直接用原文 */ }
+
+            // context 超限：學到實際上限、縮短網頁內文後重試
+            const overflow = parseContextOverflowError(errorText);
+            if (overflow && attempt < MAX_OVERFLOW_RETRIES) {
+                const cacheKey = `${config.apiUrl}-${config.modelId}`;
+                const previous = contextWindowCache.get(cacheKey) || DEFAULT_CONTEXT_TOKENS;
+                const learned = overflow.limit || Math.floor(previous / 2);
+                contextWindowCache.set(cacheKey, learned);
+                if (shrinkPageToolMessages(currentMessages, learned)) {
+                    console.warn(`[Context] 超出 context（上限 ${learned} tokens${overflow.limit ? '' : '，推估'}），縮短網頁內文後重試 ${attempt + 1}/${MAX_OVERFLOW_RETRIES}`);
+                    payload.messages = currentMessages;
+                    continue;
+                }
+            }
+            throw new Error(`API 請求失敗: ${response.status} ${errorMessage || ''}`);
         }
 
         const reader = response.body.getReader();
