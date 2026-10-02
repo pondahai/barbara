@@ -26,11 +26,16 @@ const SOWHAT_DIRECTIONS = [
 // 這只是防止模型原地打轉的下限。
 const SOWHAT_MAX_TURNS = 4;
 
+// 任何一輪都能直接放棄、不存卡片。少了它，使用者只能一路答到收尾，
+// 否則 session 會一直懸在對話裡等回覆。
+const SOWHAT_ABANDON_OPTION = { id: 'abandon', label: '結束對話（不存）' };
+
 // 記憶體中的 session。side panel 一重載就沒了，所以每次變動都要寫進 storage。
 let soWhatSession = null;
 
 function soWhatNewSession(text, pageTitle, pageUrl) {
     return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         active: true,
         selectedText: text,
         pageTitle: pageTitle || '',
@@ -119,7 +124,8 @@ async function runSingleTurn(config, messages) {
             model: config.modelId,
             messages: messages,
             stream: false
-        })
+        }),
+        signal: typeof currentAbortSignal === 'function' ? currentAbortSignal() : undefined
     });
 
     if (!response.ok) {
@@ -360,14 +366,24 @@ function soWhatRenderOptions(container, options, allowFreeText) {
         optionBox.classList.add('answered');
     };
 
-    (options || []).forEach(option => {
+    options = (options || []).slice();
+    if (!options.some(option => option.id === SOWHAT_ABANDON_OPTION.id)) options.push(SOWHAT_ABANDON_OPTION);
+
+    // 選項只屬於畫出它的那段對話；換成新的一段後，舊選項按了也不能寫進新 session
+    const ownerId = soWhatSession ? soWhatSession.id : undefined;
+    const handle = (option) => {
+        disableAll();
+        if (!soWhatSession || soWhatSession.id !== ownerId) return;
+        soWhatHandleChoice(option);
+    };
+
+    options.forEach(option => {
         const button = document.createElement('button');
         button.className = 'sowhat-option';
-        if (option.id === 'done' || option.id === 'save') button.classList.add('sowhat-option-exit');
+        if (option.id === 'done' || option.id === 'save' || option.id === 'abandon') button.classList.add('sowhat-option-exit');
         button.textContent = option.label;
         button.onclick = () => {
-            disableAll();
-            soWhatHandleChoice(option);
+            handle(option);
         };
         optionBox.appendChild(button);
     });
@@ -385,8 +401,7 @@ function soWhatRenderOptions(container, options, allowFreeText) {
             const value = input.value.trim();
             if (!value) return;
             input.value = ''; // 清空，否則殘值會留在畫面上看起來像訊息重複了一次
-            disableAll();
-            soWhatHandleChoice({ id: 'freetext', label: value });
+            handle({ id: 'freetext', label: value });
         };
         send.onclick = submit;
         input.addEventListener('keydown', (event) => {
@@ -568,13 +583,29 @@ function soWhatRenderEdit(payload) {
     const confirm = document.createElement('button');
     confirm.className = 'sowhat-option sowhat-option-exit';
     confirm.textContent = '確認，存起來';
+    const ownerId = soWhatSession ? soWhatSession.id : undefined;
+    const isStale = () => !soWhatSession || soWhatSession.id !== ownerId;
+
     confirm.onclick = () => {
         confirm.disabled = true;
         textarea.disabled = true;
+        if (isStale()) return;
         const edited = Object.assign({}, payload, { final_takeaway: textarea.value.trim() });
         soWhatFinish(edited);
     };
     content.appendChild(confirm);
+
+    const abandon = document.createElement('button');
+    abandon.className = 'sowhat-option sowhat-option-exit';
+    abandon.textContent = SOWHAT_ABANDON_OPTION.label;
+    abandon.onclick = () => {
+        confirm.disabled = true;
+        abandon.disabled = true;
+        textarea.disabled = true;
+        if (isStale()) return;
+        soWhatAbandon('已結束，未存成卡片');
+    };
+    content.appendChild(abandon);
 }
 
 // ---------------------------------------------------------------------------
@@ -589,6 +620,12 @@ async function soWhatFromContent(text) {
     }
 
     const pageInfo = await soWhatGetActivePageInfo();
+    // 上一段還沒答完就開新的：先把舊的正式結束（摺疊、清掉暫存），不讓它懸著
+    if (soWhatSession && soWhatThreadEl) {
+        soWhatThreadEl.querySelectorAll('.sowhat-options button, .sowhat-options input, .sowhat-edit button, .sowhat-edit textarea')
+            .forEach(el => { el.disabled = true; });
+        await soWhatAbandon('被新的對話取代，未存成卡片');
+    }
     soWhatThreadEl = null; // 每次新對話都用全新的容器，不要接在上一段後面
     soWhatSession = soWhatNewSession(text, pageInfo.title, pageInfo.url);
     soWhatSession.uiLog.push({ kind: 'intro' });
@@ -627,6 +664,11 @@ async function soWhatGetActivePageInfo() {
 
 async function soWhatHandleChoice(option) {
     if (!soWhatSession) return;
+
+    if (option.id === 'abandon') {
+        await soWhatAbandon('已結束，未存成卡片');
+        return;
+    }
 
     // 收尾階段的三個選項
     if (option.id === 'save') {
@@ -683,7 +725,21 @@ function soWhatLastClosePayload() {
     return null;
 }
 
+// 放棄整段對話：摺起來留個紀錄、丟掉 session，不存卡片
+async function soWhatAbandon(reason) {
+    soWhatCollapseThread(`(${reason})`);
+    const done = soWhatAppendItem('assistant-message sowhat-saved');
+    if (done) {
+        const note = document.createElement('div');
+        note.className = 'sowhat-note';
+        note.textContent = `所以呢？${reason}`;
+        done.appendChild(note);
+    }
+    await soWhatClearSession();
+}
+
 async function soWhatRequestTurn() {
+    if (typeof beginAbortableTask === 'function') beginAbortableTask();
     if (typeof setInterfaceLoading === 'function') setInterfaceLoading(true);
     try {
         const template = await soWhatLoadPromptTemplate();
@@ -721,6 +777,11 @@ async function soWhatRequestTurn() {
             soWhatRenderAsk(parsed, false);
         }
     } catch (error) {
+        if (typeof isAbortError === 'function' && isAbortError(error)) {
+            console.log('[所以呢？] 已由使用者中止');
+            await soWhatAbandon('已中止');
+            return;
+        }
         console.error('[所以呢？] 這一輪失敗:', error);
         soWhatSession.uiLog.push({ kind: 'raw', text: `錯誤: ${error.message}` });
         await soWhatSaveSession();

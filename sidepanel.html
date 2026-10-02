@@ -303,6 +303,18 @@
             display: block;
         }
         
+        .stop-task-button {
+            margin-top: 12px;
+            padding: 4px 14px;
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 4px;
+            background: transparent;
+            color: white;
+            cursor: pointer;
+        }
+        .stop-task-button:hover { background: rgba(244, 67, 54, 0.8); }
+        .stop-task-button:disabled { opacity: 0.5; cursor: default; }
+
         .talking-head {
             font-size: 40px;
             margin-bottom: 10px;
@@ -594,6 +606,7 @@
     <div class="loading-indicator" id="loadingIndicator">
         <div class="talking-head">🤖</div>
         <div><span class="dots"></span></div>
+        <button id="stopTaskButton" class="stop-task-button" title="中止目前的回答或工作流程">■ 停止</button>
     </div>
 
     <div class="container" id="container">

@@ -1453,6 +1453,7 @@ async function extractToolCallViaModel(config, phase1Text) {
 
 // NEW FUNCTION: Unified Agent Stream Loop
 async function runAgentStreamLoop(config, messages, conversationKey, recursionDepth = 0) {
+    if (recursionDepth === 0) beginAbortableTask(); // 每個新回答都有自己的中止訊號
     setInterfaceLoading(true);
     if (recursionDepth === 0) autoFollowScroll = true; // 新回答開始時重置為跟隨模式
     let currentMessages = [...messages];
@@ -1536,7 +1537,8 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                     'Authorization': `Bearer ${config.apiKey}`,
                     'ngrok-skip-browser-warning': 'true'
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: currentAbortSignal()
             });
             if (response.ok) break;
 
@@ -2013,8 +2015,12 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                     };
                     stopBtn.onclick = () => { lockDialog(); resolve('stop'); };
                     denyBtn.onclick = () => { lockDialog(); resolve('deny'); };
+                    // 等待授權期間按下全域停止：直接中止整個流程，不再送出任何請求
+                    const signal = currentAbortSignal();
+                    if (signal) signal.addEventListener('abort', () => { lockDialog(); resolve('deny'); }, { once: true });
                 });
             }
+            throwIfAborted();
 
             // [修正] 決策完成後，將互動對話框置換為動作描述 (包含動作標題)
             if (confirmationDiv) {
@@ -2066,6 +2072,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
 
             if (userDecision === 'approve') {
                 for (const toolCall of validToolCalls) {
+                    throwIfAborted();
                     const toolName = toolCall.function.name;
                     const toolArgsString = toolCall.function.arguments || "{}";
                     console.log(`[Agent] 準備執行技能: ${toolName}`, toolArgsString);
@@ -2121,7 +2128,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
 
                 console.log("[Agent] 工具執行完畢，停頓 2 秒以避免 API 速率限制 (Rate Limit)，進入下一輪迴圈...");
                 // 新增延遲，避免免費 API (如 Groq, Cerebras) 觸發 429 Too Many Requests
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await abortableDelay(2000); // 停頓期間按下停止會直接中斷
                 return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
             } else if (userDecision === 'stop') {
                 console.log("[Agent] 使用者要求停止並回答。");
@@ -2140,7 +2147,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                     });
                 }
 
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await abortableDelay(2000); // 停頓期間按下停止會直接中斷
                 return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
             } else {
                 console.log("[Agent] 使用者拒絕執行工具。");
@@ -2159,7 +2166,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                     });
                 }
 
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await abortableDelay(2000); // 停頓期間按下停止會直接中斷
                 return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
             }
         } else {
@@ -2202,7 +2209,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 smartFollowScroll();
 
                 // 停頓 2 秒避免速率限制
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await abortableDelay(2000); // 停頓期間按下停止會直接中斷
                 
                 // 清理當前變數狀態以準備進入遞迴
                 accumulatedResponse = '';
@@ -2241,6 +2248,16 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
         }
 
     } catch (error) {
+        if (isAbortError(error)) {
+            // 使用者按下停止：保留已經串流出來的部分，再補一則中止標記，對話就不會懸著
+            console.log('[Agent] 已由使用者中止');
+            let partial = accumulatedResponse;
+            if (currentStreamIsThinking && partial.trim()) partial += '</think>';
+            if (partial.trim()) await parseAndStoreFinalAssistantResponse(partial, conversationKey);
+            await addConversation(conversationKey, { role: 'assistant', content: '*(已由使用者中止)*', isThinking: false });
+            loadSelectedConfig();
+            return;
+        }
         console.error('API request or streaming failed:', error);
         await addConversation(conversationKey, { role: 'assistant', content: `錯誤: ${error.message}`, isThinking: false });
         loadSelectedConfig();
@@ -2702,11 +2719,12 @@ async function transcribeImageToText(config, dataUrl, customPrompt) {
             messages: [{ role: 'user', content: buildVisionContent(prompt, dataUrl) }],
             stream: false,
             temperature: 0
-        })
+        }),
+        signal: currentAbortSignal()
     });
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
-        throw new Error(`讀取圖片失敗: HTTP ${response.status} ${errorData.message || ''}`);
+        throw new Error(`讀取圖片失敗:HTTP ${response.status} ${errorData.message || ''}`);
     }
     const data = await response.json();
     const text = (data.choices && data.choices[0] && data.choices[0].message)
@@ -2728,9 +2746,11 @@ async function imageToTextForPipeline(imageUrl, label) {
     await addConversation(conversationKey, userMessage);
     await updateConversationItem(userMessage);
 
+    beginAbortableTask();
     setInterfaceLoading(true);
     try {
         const dataUrl = await fetchImageAsDataUrl(imageUrl);
+        throwIfAborted();
         const text = await transcribeImageToText(selectedConfig, dataUrl);
         const ocrMessage = { role: 'assistant', content: `**圖片內容辨識結果**
 
@@ -2740,7 +2760,9 @@ ${text}`, isThinking: false };
         return text;
     } catch (error) {
         console.error(`Error transcribing image for ${label}:`, error);
-        const errorResponseMessage = { role: 'assistant', content: `${label}錯誤: ${error.message}`, isThinking: false };
+        const errorResponseMessage = isAbortError(error)
+            ? { role: 'assistant', content: '*(已由使用者中止)*', isThinking: false }
+            : { role: 'assistant', content: `${label}錯誤: ${error.message}`, isThinking: false };
         await addConversation(conversationKey, errorResponseMessage);
         loadSelectedConfig();
         return null;
@@ -2841,6 +2863,51 @@ function calculateEnglishRatio(text) {
     return matches.length / text.length;
 }
 
+// === 中止目前的回答／工作流 ===
+// 真的假的會把工具全部設為自動放行，授權框的「停止」鈕不會出現；所以呢？也是一輪輪
+// 自動送出。這裡提供一個跨流程共用的中止訊號，由 loading 指示器上的「停止」鈕觸發。
+let activeAbortController = null;
+
+function beginAbortableTask() {
+    activeAbortController = new AbortController();
+    return activeAbortController.signal;
+}
+
+function currentAbortSignal() {
+    return activeAbortController ? activeAbortController.signal : undefined;
+}
+
+function isTaskAborted() {
+    return !!(activeAbortController && activeAbortController.signal.aborted);
+}
+
+function abortActiveTask() {
+    if (activeAbortController && !activeAbortController.signal.aborted) {
+        console.log('[Abort] 使用者要求中止目前的工作');
+        activeAbortController.abort();
+    }
+}
+
+function throwIfAborted() {
+    if (isTaskAborted()) throw new DOMException('使用者已中止', 'AbortError');
+}
+
+// 可被中止的等待：按下停止會立即結束等待並丟出 AbortError
+function abortableDelay(ms) {
+    return new Promise((resolve, reject) => {
+        throwIfAborted();
+        const signal = currentAbortSignal();
+        const onAbort = () => { clearTimeout(timer); reject(new DOMException('使用者已中止', 'AbortError')); };
+        const timer = setTimeout(() => { if (signal) signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    });
+}
+
+function isAbortError(error) {
+    return isTaskAborted() || (error && error.name === 'AbortError');
+}
+// === END 中止 ===
+
 // ORIGINAL setInterfaceLoading is kept
 function setInterfaceLoading(isLoading) {
     const elements = [
@@ -2864,6 +2931,18 @@ function setInterfaceLoading(isLoading) {
     const loadingIndicator = document.getElementById('loadingIndicator');
     if (loadingIndicator) {
         loadingIndicator.classList.toggle('show', isLoading);
+    }
+    const stopButton = document.getElementById('stopTaskButton');
+    if (stopButton) {
+        stopButton.onclick = () => {
+            stopButton.disabled = true;
+            stopButton.textContent = '停止中…';
+            abortActiveTask();
+        };
+        if (isLoading && !isTaskAborted()) {
+            stopButton.disabled = false;
+            stopButton.textContent = '■ 停止';
+        }
     }
 }
 
