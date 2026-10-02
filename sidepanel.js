@@ -780,6 +780,9 @@ function escapeHtml(str) {
 const conversationToolGrants = new Map(); // conversationKey -> Set<toolName>
 // 硬上限：每連續自動放行 N 輪，強制跳出一次人工確認（避免小模型空轉刷迴圈）
 const AUTO_APPROVE_CHECKPOINT_ROUNDS = 8;
+// 只有會改變網頁狀態的工具才需要檢查點；唯讀／開分頁／截圖的空轉交給全域「停止」鈕處理，
+// 否則查核這類長流程會每 8 輪被打斷一次。
+const CHECKPOINT_TOOLS = new Set(['execute_javascript_on_page']);
 
 // === NEW: 預設免詢問的工具（唯讀 + 開分頁）===
 // 這些工具不會改變網頁狀態、不會讀取憑證，逐輪詢問只會打斷閱讀與查核流程，
@@ -1952,7 +1955,8 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
             // 本輪是否完全由「預設免詢問」放行（使用者從未對這些工具做過決定）
             const autoGrantedByDefault = allGranted && batchToolNames.every(name => isAutoGrantedTool(name));
             // 硬上限檢查點：連續自動放行 N 輪後，強制人工確認一次
-            const checkpointReached = recursionDepth > 0 && recursionDepth % AUTO_APPROVE_CHECKPOINT_ROUNDS === 0;
+            const checkpointReached = recursionDepth > 0 && recursionDepth % AUTO_APPROVE_CHECKPOINT_ROUNDS === 0
+                && batchToolNames.some(name => CHECKPOINT_TOOLS.has(name));
 
             // 需要人工決策時強制聚焦到授權對話框；自動放行則只是紀錄，走智慧跟隨不打擾使用者
             if (allGranted && !checkpointReached) {
