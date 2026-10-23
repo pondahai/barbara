@@ -66,6 +66,13 @@
         }
         .conversation-item:nth-child(even) { background-color: rgba(255, 255, 255, 0.6); }
         /* 圖片訊息（右鍵「讀取圖片文字」／「翻譯圖片」）不要撐破側欄 */
+        /* 對話框 CTRL-V 貼上的圖片預覽 */
+        .pasted-image-preview { position: relative; display: inline-block; margin-bottom: 4px; }
+        .pasted-image-preview img { max-height: 80px; max-width: 160px; border-radius: 4px; border: 1px solid #ccc; display: block; }
+        .pasted-image-preview button {
+            position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0;
+            border-radius: 50%; border: none; background: #e53935; color: #fff; cursor: pointer; line-height: 20px;
+        }
         .conversation-item img {
             max-width: 100%;
             height: auto;
@@ -643,7 +650,11 @@
 
             <div class="input-container">
                 <div>
-                    <textarea id="userInput" placeholder="輸入您的對話..."></textarea>
+                    <div id="pastedImagePreview" class="pasted-image-preview" style="display:none;">
+                        <img id="pastedImageThumb" alt="貼上的圖片">
+                        <button id="removePastedImageButton" title="移除圖片">×</button>
+                    </div>
+                    <textarea id="userInput" placeholder="輸入您的對話...（可按 CTRL-V 貼上圖片）"></textarea>
                     <div class="hint">按下 CTRL-ENTER 也可以送出</div>
                 </div>
                 <div class="button-container">

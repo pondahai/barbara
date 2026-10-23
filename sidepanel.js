@@ -10,6 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
             sendMessage();
         }
     });
+    // CTRL-V 貼上圖片：先縮圖存成 dataUrl，送出時以 vision 格式附給模型
+    document.getElementById('userInput').addEventListener('paste', handleImagePaste);
+    document.getElementById('removePastedImageButton').addEventListener('click', clearPastedImage);
     document.getElementById('fetchModelsButton').addEventListener('click', fetchModels);
     document.getElementById('saveConfigButton').addEventListener('click', saveConfig);
     document.getElementById('configList').addEventListener('click', (event) => {
@@ -1455,7 +1458,8 @@ async function extractToolCallViaModel(config, phase1Text) {
 // === END 第二階段反芻抽取 ===
 
 // NEW FUNCTION: Unified Agent Stream Loop
-async function runAgentStreamLoop(config, messages, conversationKey, recursionDepth = 0) {
+// options.noTools：不提供工具（圖片任務用，避免模型跑去讀網頁而不看對話中的圖片）
+async function runAgentStreamLoop(config, messages, conversationKey, recursionDepth = 0, options = {}) {
     if (recursionDepth === 0) beginAbortableTask(); // 每個新回答都有自己的中止訊號
     setInterfaceLoading(true);
     if (recursionDepth === 0) autoFollowScroll = true; // 新回答開始時重置為跟隨模式
@@ -1464,11 +1468,13 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
     if (currentMessages.length > 0 && currentMessages[0].role !== 'system') {
         currentMessages.unshift({
             role: 'system',
-            content: 'You are a helpful AI assistant. You have access to various tools (functions). If the user asks you to perform an action that requires a tool (such as reading the current webpage, executing javascript, or opening a new tab), YOU MUST USE THE PROVIDED TOOL. Do not simply describe that you need to use a tool, but actually output the proper JSON function call.'
+            content: options.noTools
+                ? 'You are a helpful AI assistant. The image you need is attached directly in the user message. Look at that attached image and answer based only on it. You cannot browse or read any webpage.'
+                : 'You are a helpful AI assistant. You have access to various tools (functions). If the user asks you to perform an action that requires a tool (such as reading the current webpage, executing javascript, or opening a new tab), YOU MUST USE THE PROVIDED TOOL. Do not simply describe that you need to use a tool, but actually output the proper JSON function call.'
         });
     }
 
-    const availableTools = Object.values(ToolRegistry).map(tool => tool.schema);
+    const availableTools = options.noTools ? [] : Object.values(ToolRegistry).map(tool => tool.schema);
     accumulatedResponse = '';
     streamingDOMs.main = null;
     streamingDOMs.think = null;
@@ -2133,7 +2139,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 console.log("[Agent] 工具執行完畢，停頓 2 秒以避免 API 速率限制 (Rate Limit)，進入下一輪迴圈...");
                 // 新增延遲，避免免費 API (如 Groq, Cerebras) 觸發 429 Too Many Requests
                 await abortableDelay(2000); // 停頓期間按下停止會直接中斷
-                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
+                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1, options);
             } else if (userDecision === 'stop') {
                 console.log("[Agent] 使用者要求停止並回答。");
                 const stoppedDiv = document.createElement('div');
@@ -2152,7 +2158,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 }
 
                 await abortableDelay(2000); // 停頓期間按下停止會直接中斷
-                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
+                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1, options);
             } else {
                 console.log("[Agent] 使用者拒絕執行工具。");
                 const declinedDiv = document.createElement('div');
@@ -2171,7 +2177,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 }
 
                 await abortableDelay(2000); // 停頓期間按下停止會直接中斷
-                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
+                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1, options);
             }
         } else {
             // [新增] 檢查是否模型「只有思考，沒有回答」，如果是，強迫它繼續
@@ -2221,7 +2227,7 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
                 streamingDOMs.think = null;
                 currentStreamIsThinking = false;
                 
-                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1);
+                return await runAgentStreamLoop(config, currentMessages, conversationKey, recursionDepth + 1, options);
             }
 
             console.log("[Agent] 最終對話生成完畢。");
@@ -2274,10 +2280,46 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
     }
 }
 
+// 對話框貼上、尚未送出的圖片（dataUrl）
+let pendingPastedImage = null;
+
+async function handleImagePaste(event) {
+    const items = event.clipboardData ? Array.from(event.clipboardData.items) : [];
+    const imageItem = items.find(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (!imageItem) return; // 純文字照常貼上
+    event.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    const objectUrl = URL.createObjectURL(file);
+    try {
+        pendingPastedImage = await fetchImageAsDataUrl(objectUrl); // 沿用右鍵圖片的縮圖邏輯
+        document.getElementById('pastedImageThumb').src = pendingPastedImage;
+        document.getElementById('pastedImagePreview').style.display = 'inline-block';
+    } catch (e) {
+        console.error('[paste] 讀取貼上的圖片失敗:', e);
+        alert(`讀取貼上的圖片失敗: ${e.message}`);
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
+}
+
+function clearPastedImage() {
+    pendingPastedImage = null;
+    document.getElementById('pastedImageThumb').removeAttribute('src');
+    document.getElementById('pastedImagePreview').style.display = 'none';
+}
+
+// 歷史裡的貼上圖片是 base64，再送給 API 只會塞爆 context，換成佔位文字
+function stripInlineDataImages(content) {
+    if (typeof content !== 'string') return content;
+    return content.replace(/!\[[^\]]*\]\(data:image\/[^)]+\)/g, '[圖片]');
+}
+
 async function sendMessage() {
     const userInputElement = document.getElementById('userInput');
     const userInputText = userInputElement ? userInputElement.value.trim() : "";
-    if (!userInputText) return;
+    const pastedImage = pendingPastedImage;
+    if (!userInputText && !pastedImage) return;
 
     if (!selectedConfig || !selectedConfig.apiUrl || !selectedConfig.modelId) {
         alert("請先完整設定 API (網址、金鑰、模型)。");
@@ -2285,20 +2327,29 @@ async function sendMessage() {
     }
 
     const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
-    const userMessage = { role: 'user', content: userInputText };
+    const promptText = userInputText || '請看這張圖片並描述內容。';
+    const userMessage = {
+        role: 'user',
+        content: pastedImage ? `${promptText}\n\n![](${pastedImage})` : userInputText
+    };
 
     await addConversation(conversationKey, userMessage);
     await updateConversationItem(userMessage);
 
     if (userInputElement) userInputElement.value = '';
+    clearPastedImage();
 
     const conversationsHistory = await getConversations(conversationKey);
     const messagesForAPI = conversationsHistory
         .filter(conv => !conv.isThinking && !conv.isStep) // MODIFIED: Filter out steps
-        .map(conv => ({ role: conv.role, content: conv.content }));
+        .map(conv => ({ role: conv.role, content: stripInlineDataImages(conv.content) }));
+    // 最後一則就是剛送出的訊息：有圖片就改成 vision 格式，並關掉工具，讓模型看圖而不是去讀網頁
+    if (pastedImage && messagesForAPI.length > 0) {
+        messagesForAPI[messagesForAPI.length - 1].content = buildVisionContent(promptText, pastedImage);
+    }
 
     try {
-        await runAgentStreamLoop(selectedConfig, messagesForAPI, conversationKey);
+        await runAgentStreamLoop(selectedConfig, messagesForAPI, conversationKey, 0, { noTools: !!pastedImage });
     } catch (error) {
         console.error('Error sending message or processing response:', error);
         const errorResponseMessage = { role: 'assistant', content: `錯誤: ${error.message}`, isThinking: false };
@@ -2684,7 +2735,9 @@ async function runImageVisionTask(imageUrl, promptText, displayLabel, errorLabel
         await runAgentStreamLoop(
             selectedConfig,
             [{ role: 'user', content: buildVisionContent(promptText, dataUrl) }],
-            conversationKey
+            conversationKey,
+            0,
+            { noTools: true }
         );
     } catch (error) {
         console.error(`Error in ${errorLabel}:`, error);
