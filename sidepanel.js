@@ -638,10 +638,29 @@ async function updateConversationItem(message) { // message is {role, content}
 
     return itemIndex + 1; // This will be the starting index for the AI's response parts
 }
+// 找「使用者正在看的分頁」。側邊欄裡 currentWindow 就是那個瀏覽器視窗；
+// 但在 PWA 觸發的獨立 popup 視窗裡，currentWindow 是 popup 自己（只有 sidepanel.html），
+// 而 open_new_tab 開的網頁會落在一般視窗，所以要改找最後聚焦的一般視窗的作用中分頁。
+function queryTargetTabs(callback) {
+    chrome.windows.getCurrent((win) => {
+        if (!chrome.runtime.lastError && win && win.type === 'normal') {
+            chrome.tabs.query({ active: true, currentWindow: true }, callback);
+            return;
+        }
+        chrome.windows.getLastFocused({ windowTypes: ['normal'], populate: true }, (normalWin) => {
+            if (chrome.runtime.lastError || !normalWin || !normalWin.tabs) {
+                callback([]);
+                return;
+            }
+            callback(normalWin.tabs.filter(t => t.active));
+        });
+    });
+}
+
 // NEW HELPER FUNCTION: Get Page Content from Active Tab
 async function getCurrentPageContext() {
     return new Promise((resolve) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        queryTargetTabs((tabs) => {
             if (tabs && tabs.length > 0) {
                 const activeTab = tabs[0];
                 chrome.tabs.sendMessage(activeTab.id, { action: "getPageContent" }, (response) => {
@@ -662,7 +681,7 @@ async function getCurrentPageContext() {
 // NEW HELPER: 取得當前分頁上的圖片元素清單（給 agent 的看圖技能用）
 async function getPageImagesContext() {
     return new Promise((resolve) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        queryTargetTabs((tabs) => {
             if (tabs && tabs.length > 0) {
                 chrome.tabs.sendMessage(tabs[0].id, { action: "getPageImages" }, (response) => {
                     if (chrome.runtime.lastError || !response) {
@@ -684,7 +703,7 @@ async function getPageImagesContext() {
 // <all_urls> 或 activeTab，不是 "tabs" 權限），所以不需要新增任何權限。
 async function captureVisibleTabDataUrl() {
     return new Promise((resolve, reject) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        queryTargetTabs((tabs) => {
             if (!tabs || tabs.length === 0) return reject(new Error('找不到作用中的分頁'));
             chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'jpeg', quality: 85 }, (dataUrl) => {
                 if (chrome.runtime.lastError || !dataUrl) {
@@ -705,7 +724,7 @@ let lastListedPageImages = [];
 // NEW HELPER FUNCTION: Get YouTube Transcript from Active Tab
 async function getYoutubeTranscriptContext() {
     return new Promise((resolve) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        queryTargetTabs((tabs) => {
             if (tabs && tabs.length > 0) {
                 const activeTab = tabs[0];
                 chrome.tabs.sendMessage(activeTab.id, { action: "getYoutubeTranscript" }, (response) => {
@@ -726,7 +745,7 @@ async function getYoutubeTranscriptContext() {
 // NEW HELPER FUNCTION: Execute JS in Active Tab
 async function executeScriptInActiveTab(code) {
     return new Promise((resolve, reject) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        queryTargetTabs((tabs) => {
             if (tabs && tabs.length > 0) {
                 const activeTab = tabs[0];
                 // Check if it's a restricted URL (chrome://, etc.) before trying to inject

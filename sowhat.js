@@ -742,7 +742,7 @@ async function soWhatFromContent(text) {
 
 async function soWhatGetActivePageInfo() {
     return new Promise((resolve) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        queryTargetTabs((tabs) => {
             if (tabs && tabs.length > 0) {
                 resolve({ title: tabs[0].title || '', url: tabs[0].url || '' });
             } else {
