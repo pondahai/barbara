@@ -698,6 +698,26 @@ async function getPageImagesContext() {
     });
 }
 
+// NEW HELPER: 取得當前分頁上的連結清單（文字 + 真正網址）
+async function getPageLinksContext() {
+    return new Promise((resolve) => {
+        queryTargetTabs((tabs) => {
+            if (tabs && tabs.length > 0) {
+                chrome.tabs.sendMessage(tabs[0].id, { action: "getPageLinks" }, (response) => {
+                    if (chrome.runtime.lastError || !response) {
+                        console.warn("無法取得網頁連結清單:", chrome.runtime.lastError);
+                        resolve(null);
+                    } else {
+                        resolve(response); // {title, url, links:[...]}
+                    }
+                });
+            } else {
+                resolve(null);
+            }
+        });
+    });
+}
+
 // NEW HELPER: 截取當前分頁的可視畫面，回傳 data URL。
 // 依賴 manifest 既有的 host_permissions "<all_urls>"（captureVisibleTab 的要求是
 // <all_urls> 或 activeTab，不是 "tabs" 權限），所以不需要新增任何權限。
@@ -720,6 +740,9 @@ async function captureVisibleTabDataUrl() {
 // agent 用的最近一次圖片清單：look_at_page_image 可以用編號指定，
 // 不必要求模型把長長的圖片網址原封不動抄回來（本地模型很容易抄錯）。
 let lastListedPageImages = [];
+// 同理：open_new_tab 可以用 link_index 指定 list_page_links 清單裡的連結，
+// 保證開的是頁面上真的存在的網址，而不是模型抄錯或自己湊出來的。
+let lastListedPageLinks = [];
 
 // NEW HELPER FUNCTION: Get YouTube Transcript from Active Tab
 async function getYoutubeTranscriptContext() {
@@ -817,6 +840,7 @@ const CHECKPOINT_TOOLS = new Set(['execute_javascript_on_page']);
 const AUTO_GRANTED_TOOLS = new Set([
     "read_current_webpage",
     "list_page_images",
+    "list_page_links",
     "look_at_page_image",
     "get_youtube_transcript",
     "open_new_tab",
@@ -1078,6 +1102,32 @@ const ToolRegistry = {
             }
         }
     },
+    // ✨ 技能: 列出網頁裡的連結（真正的網址）
+    list_page_links: {
+        getDisplayName: () => "🔗 列出網頁上的連結",
+        getUiDescription: () => "代理想要列出目前網頁上的連結清單（連結文字與實際網址），以便決定要開哪一個。",
+        schema: {
+            type: "function",
+            function: {
+                name: "list_page_links",
+                description: "列出當前網頁上的連結（編號、連結文字、實際網址）。read_current_webpage 只回傳純文字、不含任何網址，所以在搜尋結果頁挑來源、要開啟頁面上某個連結、或要在回覆中引用網址時，都必須先呼叫此工具取得真正的網址。要開啟其中某個連結，用 open_new_tab 並帶入 link_index。",
+                parameters: { type: "object", properties: {} }
+            }
+        },
+        execute: async () => {
+            console.log("[Tool] 正在執行 list_page_links...");
+            try {
+                const data = await getPageLinksContext();
+                if (!data) return "工具執行失敗，無法讀取網頁連結（可能是特殊頁面，或需要重新整理網頁讓外掛的 content script 載入）。";
+                lastListedPageLinks = data.links || [];
+                if (lastListedPageLinks.length === 0) return `網頁「${data.title}」上沒有找到連結。`;
+                const lines = lastListedPageLinks.map(link => `${link.index}. ${link.text}\n   ${link.href}`).join('\n');
+                return `網頁「${data.title}」上的連結共 ${lastListedPageLinks.length} 個：\n${lines}\n\n要開啟某個連結，請用 open_new_tab 並帶入 link_index（上面的編號），不要自己改寫或拼湊網址。引用來源時也只能使用上面列出的網址。`;
+            } catch (error) {
+                return `工具執行失敗: ${error.message}`;
+            }
+        }
+    },
     // ✨ 技能 8: 細看網頁裡的某一張圖片
     look_at_page_image: {
         getDisplayName: () => "🔍 細看網頁上的某張圖片",
@@ -1144,7 +1194,7 @@ const ToolRegistry = {
             type: "function",
             function: {
                 name: "read_current_webpage",
-                description: "當使用者要求摘要、總結、翻譯當前網頁，或詢問了需要看網頁內容（例如『這篇文章』、『這個網頁寫什麼』）才能回答的問題時，呼叫此工具。"
+                description: "當使用者要求摘要、總結、翻譯當前網頁，或詢問了需要看網頁內容（例如『這篇文章』、『這個網頁寫什麼』）才能回答的問題時，呼叫此工具。注意：回傳的只有純文字，不含任何連結網址；需要網址時請改用 list_page_links。"
             }
         },
         execute: async (args) => {
@@ -1195,36 +1245,52 @@ const ToolRegistry = {
     open_new_tab: {
         getDisplayName: () => "🌐 開啟新分頁",
         getUiDescription: (args) => {
-            const safeUrl = (args.url && /^https?:\/\//i.test(args.url)) ? args.url : '#';
-            const displayUrl = escapeHtml(args.url || '');
+            // 用 link_index 時也要顯示實際網址：自動放行靠這裡強制揭露目標
+            let url = args.url;
+            if (args.link_index !== undefined && args.link_index !== null && args.link_index !== '') {
+                const link = lastListedPageLinks.find(l => l.index === Number(args.link_index));
+                url = link ? link.href : `(找不到第 ${args.link_index} 個連結)`;
+            }
+            const safeUrl = (url && /^https?:\/\//i.test(url)) ? url : '#';
+            const displayUrl = escapeHtml(url || '');
             return `代理想要為你開啟一個新分頁並前往: <a href="${escapeHtml(safeUrl)}" target="_blank" style="color: #4CAF50;">${displayUrl}</a>`;
         },
         schema: {
             type: "function",
             function: {
                 name: "open_new_tab",
-                description: "當使用者要求開啟一個新分頁、開啟網頁、前往某個網址或搜尋某個關鍵字時，呼叫此工具。如果是直接搜尋，請將搜尋關鍵字轉換為搜尋引擎網址 (如 https://www.google.com/search?q=關鍵字)。",
+                description: "當使用者要求開啟一個新分頁、開啟網頁、前往某個網址或搜尋某個關鍵字時，呼叫此工具。如果是直接搜尋，請將搜尋關鍵字轉換為搜尋引擎網址 (如 https://www.google.com/search?q=關鍵字)。要開啟網頁上的某個連結（例如搜尋結果中的某筆）時，必須先用 list_page_links 取得清單，再用 link_index 指定；絕對不要憑標題或網站名稱自己猜網址，猜出來的網址通常是 404。",
                 parameters: {
                     type: "object",
                     properties: {
                         url: {
                             type: "string",
-                            description: "要開啟的完整網址 (需包含 https:// 等協議)。例如: 'https://www.google.com/search?q=apple'"
+                            description: "要開啟的完整網址 (需包含 https:// 等協議)，只用於使用者直接給的網址或搜尋引擎網址。例如: 'https://www.google.com/search?q=apple'"
+                        },
+                        link_index: {
+                            type: "integer",
+                            description: "list_page_links 回傳清單中的連結編號，例如 3。開啟頁面上的連結時優先用這個，而不是 url。"
                         }
-                    },
-                    required: ["url"]
+                    }
                 }
             }
         },
         execute: async (args) => {
-            console.log("[Tool] 正在執行 open_new_tab...", args.url);
+            let url = args.url;
+            if (args.link_index !== undefined && args.link_index !== null && args.link_index !== '') {
+                const link = lastListedPageLinks.find(l => l.index === Number(args.link_index));
+                if (!link) return `找不到編號 ${args.link_index} 的連結。請先呼叫 list_page_links 取得目前網頁的連結清單。`;
+                url = link.href;
+            }
+            if (!url) return "未指定網址。請提供 url，或先呼叫 list_page_links 再用 link_index 指定。";
+            console.log("[Tool] 正在執行 open_new_tab...", url);
             try {
                 return await new Promise((resolve) => {
-                    chrome.tabs.create({ url: args.url }, (tab) => {
+                    chrome.tabs.create({ url: url }, (tab) => {
                         if (chrome.runtime.lastError) {
                             resolve(`開啟失敗: ${chrome.runtime.lastError.message}`);
                         } else {
-                            resolve(`已成功開啟新分頁: ${args.url}`);
+                            resolve(`已成功開啟新分頁: ${url}`);
                         }
                     });
                 });
@@ -2664,8 +2730,8 @@ async function factCheckTextFromContent(text) {
     const messageContent = `請幫我查核以下這段文字的真實性（真的假的）：\n"""\n${text}\n"""\n\n` +
         `請務必實際上網查資料，不要只憑既有知識回答，步驟如下：\n` +
         `1. 用 open_new_tab 開啟搜尋結果頁（例如 https://www.google.com/search?q=關鍵字），關鍵字取自上面文字的核心主張。\n` +
-        `2. 用 read_current_webpage 讀取搜尋結果，挑出可信度較高的來源。\n` +
-        `3. 需要時再用 open_new_tab 開啟個別來源並用 read_current_webpage 讀取內容，交叉比對至少兩個來源。\n` +
+        `2. 用 list_page_links 取得搜尋結果的連結清單（含真正網址），挑出可信度較高的來源。\n` +
+        `3. 用 open_new_tab 帶入 link_index 開啟個別來源（不要自己猜網址），再用 read_current_webpage 讀取內容，交叉比對至少兩個來源。\n` +
         `4. 最後用 ${replyLanguage} 回覆，格式為：\n` +
         `   - 結論：真的 / 假的 / 部分正確 / 證據不足\n` +
         `   - 理由：條列說明查到的證據與矛盾之處\n` +

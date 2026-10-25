@@ -32,6 +32,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (images.length >= MAX_IMAGES) break;
         }
         sendResponse({ title: document.title, url: location.href, images: images });
+    } else if (request.action === "getPageLinks") {
+        // 列出網頁上的連結（文字 + 真正的 href）。getPageContent 只抓 innerText，
+        // 網址會全部丟失，模型只好憑標題自己湊網址，結果常是 404。
+        const MAX_LINKS = 80;
+        const seen = new Set();
+        const links = [];
+        const here = location.href.split('#')[0];
+        for (const a of document.querySelectorAll('a[href]')) {
+            let href = a.href || '';
+            // Google 等搜尋引擎的轉址連結：/url?q=真正網址 或 /url?url=真正網址
+            try {
+                const u = new URL(href);
+                if (u.pathname === '/url') {
+                    const target = u.searchParams.get('q') || u.searchParams.get('url');
+                    if (target) href = target;
+                }
+            } catch (e) { continue; }
+            if (!/^https?:\/\//i.test(href)) continue; // 跳過 javascript:、mailto: 等
+            if (href.split('#')[0] === here) continue; // 同頁錨點
+            if (seen.has(href)) continue;
+            const text = (a.innerText || a.getAttribute('aria-label') || a.title || '').replace(/\s+/g, ' ').trim();
+            if (!text) continue; // 沒文字的多半是 icon 連結，列出來模型也不知道是什麼
+            const rect = a.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) continue; // 隱藏的連結
+            seen.add(href);
+            links.push({ index: links.length + 1, text: text.slice(0, 150), href: href });
+            if (links.length >= MAX_LINKS) break;
+        }
+        sendResponse({ title: document.title, url: location.href, links: links });
     } else if (request.action === "getPageContent") {
         const pageTitle = document.title;
 

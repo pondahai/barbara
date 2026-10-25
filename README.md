@@ -43,6 +43,7 @@ Barbara 是一款強大且直觀的 Chrome 擴充功能，專為提升網頁瀏�
         * ⏪ `switch_to_previous_tab`: 快速切換回上一個瀏覽的分頁。
         * 🔍 `switch_to_tab`: 根據關鍵字尋找並切換到已開啟的特定分頁。
         * 👁️ `see_current_screen`: 截取當前可視畫面並用視覺模型判讀，處理 DOM 讀不到的 Canvas、圖片型 PDF 與版面問題。
+        * 🔗 `list_page_links`: 列出網頁上的連結（編號、文字、實際網址），`open_new_tab` 可用 `link_index` 開啟，避免模型自己猜網址。
         * 🖼️ `list_page_images`: 列出網頁上的圖片元素（編號、alt、尺寸、網址）。
         * 🔍 `look_at_page_image`: 依編號或網址細看某張圖片的實際內容（圖中文字、圖表數值）。
     * **遞迴思考迴圈**: Agent 具備初步的 Chain-of-Thought (思考鏈) 並有能力連續呼叫多個工具直到任務完成。
