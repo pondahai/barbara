@@ -1485,12 +1485,20 @@ async function runAgentStreamLoop(config, messages, conversationKey, recursionDe
     let currentMessages = [...messages];
 
     if (currentMessages.length > 0 && currentMessages[0].role !== 'system') {
-        currentMessages.unshift({
-            role: 'system',
-            content: options.noTools
-                ? 'You are a helpful AI assistant. The image you need is attached directly in the user message. Look at that attached image and answer based only on it. You cannot browse or read any webpage.'
-                : 'You are a helpful AI assistant. You have access to various tools (functions). If the user asks you to perform an action that requires a tool (such as reading the current webpage, executing javascript, or opening a new tab), YOU MUST USE THE PROVIDED TOOL. Do not simply describe that you need to use a tool, but actually output the proper JSON function call.'
-        });
+        // vision 訊息的 content 是 parts 陣列；純文字的 noTools 任務（例如翻譯）不能說有附圖
+        const hasImage = currentMessages.some(m => Array.isArray(m.content));
+        let systemContent;
+        if (!options.noTools) {
+            systemContent = 'You are a helpful AI assistant. You have access to various tools (functions). If the user asks you to perform an action that requires a tool (such as reading the current webpage, executing javascript, or opening a new tab), YOU MUST USE THE PROVIDED TOOL. Do not simply describe that you need to use a tool, but actually output the proper JSON function call.';
+        } else if (hasImage) {
+            systemContent = 'You are a helpful AI assistant. The image you need is attached directly in the user message. Look at that attached image and answer based only on it. You cannot browse or read any webpage.';
+        } else {
+            systemContent = 'You are a helpful AI assistant. Answer based only on the text in the conversation. You cannot browse or read any webpage.';
+        }
+        // 回覆語言跟著瀏覽器；使用者訊息若明確指定輸出語言（例如翻譯），以使用者訊息為準
+        const replyLanguage = getLanguageNameForPrompt(navigator.language || 'zh-TW');
+        systemContent += ` Always reply in ${replyLanguage}, unless the user message explicitly asks for output in another language (e.g. a translation target) — in that case follow the user message.`;
+        currentMessages.unshift({ role: 'system', content: systemContent });
     }
 
     const availableTools = options.noTools ? [] : Object.values(ToolRegistry).map(tool => tool.schema);
@@ -2558,7 +2566,7 @@ async function summarizeTextFromContent(text) {
         return;
     }
     const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
-    const messageContent = `Please summarize the following text:\n${text}\n\nUsing local language: ${navigator.language}`;
+    const messageContent = `Please summarize the following text:\n${text}\n\nUsing local language: ${getLanguageNameForPrompt(navigator.language || 'zh-TW')}`;
     const userMessage = { role: 'user', content: messageContent };
 
     await addConversation(conversationKey, userMessage);
