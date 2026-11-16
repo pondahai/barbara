@@ -456,7 +456,7 @@ function loadConversations(config, options = {}) {
             deleteButton.className = 'delete-button';
             deleteButton.textContent = 'X';
             deleteButton.title = '刪除此訊息';
-            deleteButton.onclick = () => confirmDeleteConversation(conversationKey, index);
+            deleteButton.onclick = (e) => confirmDeleteConversation(conversationKey, index, e.currentTarget);
             div.appendChild(deleteButton);
 
             const copyButton = document.createElement('button');
@@ -563,7 +563,7 @@ async function renderAndAppendConversationItem(messageObject, isNewItem = true) 
         deleteButton.className = 'delete-button';
         deleteButton.textContent = 'X';
         deleteButton.title = '刪除此訊息';
-        deleteButton.onclick = () => confirmDeleteConversation(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`, finalIndex);
+        deleteButton.onclick = (e) => confirmDeleteConversation(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`, finalIndex, e.currentTarget);
         div.appendChild(deleteButton);
 
         const copyButton = document.createElement('button');
@@ -615,7 +615,7 @@ async function updateConversationItem(message) { // message is {role, content}
     const conversations = await getConversations(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`);
     const itemIndex = Math.max(0, conversations.length - 1);
 
-    deleteButton.onclick = () => confirmDeleteConversation(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`, itemIndex);
+    deleteButton.onclick = (e) => confirmDeleteConversation(`${selectedConfig.apiUrl}-${selectedConfig.modelId}`, itemIndex, e.currentTarget);
     div.appendChild(deleteButton);
 
     const copyButton = document.createElement('button');
@@ -2595,22 +2595,45 @@ function deleteConversation(key, index) {
     });
 }
 
-async function confirmDeleteConversation(key, index) {
-    if (confirm('確定要刪除這則對話嗎？')) {
-        deleteConversation(key, index);
+// 不跳視窗：第一次按 ✖ 變成「刪除？」，3 秒內再按一次才真的刪
+// 通用：回傳 true 表示這是第二次按（已確認），false 表示剛進入待確認狀態
+function armInlineConfirm(btn, label = '刪除？') {
+    if (!btn) return true;
+    if (btn.dataset.armed === '1') {
+        clearTimeout(btn._disarmTimer);
+        btn._restore();
+        return true;
     }
+    const originalHtml = btn.innerHTML;
+    const originalTitle = btn.title;
+    btn._restore = () => {
+        btn.dataset.armed = '';
+        btn.classList.remove('armed');
+        btn.innerHTML = originalHtml;
+        btn.title = originalTitle;
+    };
+    btn.dataset.armed = '1';
+    btn.classList.add('armed');
+    btn.textContent = label;
+    btn.title = '再按一次確定';
+    btn._disarmTimer = setTimeout(btn._restore, 3000);
+    return false;
+}
+
+async function confirmDeleteConversation(key, index, btn) {
+    if (armInlineConfirm(btn)) deleteConversation(key, index);
 }
 
 // ORIGINAL copyConversation IS REPLACED by copySingleConversationContent called directly
 
 // ORIGINAL deleteAllConversations is kept
-async function deleteAllConversations() {
+async function deleteAllConversations(e) {
     if (!selectedConfig) {
         alert("請先設定 API 網址和 API 金鑰");
         return;
     }
     const conversationKey = `${selectedConfig.apiUrl}-${selectedConfig.modelId}`;
-    if (confirm('確定要刪除所有對話嗎？')) {
+    if (armInlineConfirm(e && e.currentTarget, '全部刪除？')) {
         try {
             await setConversations(conversationKey, []);
             console.log("[DEBUG] Successfully cleared all conversations for key:", conversationKey);
@@ -3333,7 +3356,7 @@ function loadConfigList(configs) { // This populates the list on the settings pa
         deleteButton.title = "刪除此設定";
         deleteButton.onclick = (e) => { // MODIFIED: Stop propagation to prevent config item click
             e.stopPropagation();
-            if (confirm(`確定要刪除設定 "${config.apiUrl} - ${config.modelId || ''}" 嗎？`)) {
+            if (armInlineConfirm(e.currentTarget)) {
                 deleteConfig(index);
             }
         };

@@ -97,6 +97,16 @@
             border-radius: 50%;
             z-index: 1;
         }
+        button.armed,
+        .conversation-item button.delete-button.armed {
+            width: auto;
+            padding: 0 8px;
+            font-size: 12px;
+            border-radius: 10px;
+            background: #e53935;
+            color: #fff;
+            white-space: nowrap;
+        }
         /* NEW: 回答期間鎖住刪除鈕與換頁鈕 */
         body.answer-locked .conversation-item button.delete-button,
         body.answer-locked .sowhat-thread > button.sowhat-thread-delete,

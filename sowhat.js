@@ -359,8 +359,8 @@ function soWhatBuildThreadDeleteButton() {
     button.className = 'delete-button sowhat-thread-delete';
     button.textContent = 'X';
     button.title = '刪除整段「所以呢？」對話';
-    button.onclick = async () => {
-        if (!confirm('確定要刪除整段「所以呢？」對話嗎？（已存成的卡片不受影響）')) return;
+    button.onclick = async (e) => {
+        if (!armInlineConfirm(e.currentTarget)) return;
         try {
             await soWhatClearSession();
         } catch (e) {
@@ -1176,10 +1176,10 @@ async function soWhatOpenCardTable() {
     const remove = document.createElement('button');
     remove.className = 'sowhat-option sowhat-option-exit';
     remove.textContent = '刪除';
-    remove.onclick = async () => {
+    remove.onclick = async (e) => {
         const ids = selectedIds();
         if (ids.length === 0) { alert('請先勾選要刪除的卡片。'); return; }
-        if (!confirm(`確定要刪除 ${ids.length} 張卡片嗎？此動作無法復原。`)) return;
+        if (!armInlineConfirm(e.currentTarget, `刪除 ${ids.length} 張？`)) return;
         await soWhatDeleteCards(ids);
         soWhatOpenCardTable(); // 重開以刷新清單
     };
